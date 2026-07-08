@@ -1,0 +1,3277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Engineering Toolbox — TPE</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { margin: 0; background: #0a0a0a; }
+  @media print {
+    html, body { background: white !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useMemo } = React;
+
+// ---------- constants / reference tables ----------
+const STD_MOTORS_KW = [0.37,0.55,0.75,1.1,1.5,2.2,3,3.7,4,5.5,7.5,9.2,11,15,18.5,22,30,37,45,55,75,90,110];
+const STD_GEARBOX_RATIOS = [5,7.5,10,12.5,15,20,25,30,40,50,60,80,100,120,150,180,200,250];
+const SYNC_RPM = [960, 1450, 2900];
+
+const BULK_DENSITY_PRESETS = [
+  { label: "Wood chip (biomass)", value: 300 },
+  { label: "Sawdust", value: 220 },
+  { label: "EFB (empty fruit bunch, shredded)", value: 180 },
+  { label: "Parawood chip", value: 280 },
+  { label: "Rice husk", value: 130 },
+  { label: "Bark", value: 250 },
+  { label: "Custom…", value: null },
+];
+
+const INCLINE_FACTOR_TABLE = [
+  { deg: 0, f: 1.0 }, { deg: 5, f: 0.95 }, { deg: 10, f: 0.9 }, { deg: 15, f: 0.8 },
+  { deg: 20, f: 0.7 }, { deg: 25, f: 0.58 }, { deg: 30, f: 0.45 }, { deg: 35, f: 0.3 },
+];
+
+function inclineFactor(deg) {
+  const d = Math.max(0, Math.min(35, deg));
+  for (let i = 0; i < INCLINE_FACTOR_TABLE.length - 1; i++) {
+    const a = INCLINE_FACTOR_TABLE[i], b = INCLINE_FACTOR_TABLE[i + 1];
+    if (d >= a.deg && d <= b.deg) {
+      const t = (d - a.deg) / (b.deg - a.deg);
+      return a.f + t * (b.f - a.f);
+    }
+  }
+  return 0.3;
+}
+
+function screwMaxRpmGuideline(D_mm) {
+  // rough CEMA-style guideline, decreasing with diameter
+  const table = [ [100,170], [150,140], [200,120], [250,105], [300,95], [350,85], [400,75], [450,70], [500,65], [600,55] ];
+  if (D_mm <= table[0][0]) return table[0][1];
+  if (D_mm >= table[table.length-1][0]) return table[table.length-1][1];
+  for (let i=0;i<table.length-1;i++){
+    const [d0,r0]=table[i], [d1,r1]=table[i+1];
+    if (D_mm>=d0 && D_mm<=d1){
+      const t=(D_mm-d0)/(d1-d0);
+      return r0 + t*(r1-r0);
+    }
+  }
+  return 60;
+}
+
+// Screw conveyor "Diameter Factor" (Fd) — represents frictional resistance of the screw's own
+// weight, independent of load. Table values from published screw conveyor engineering guide data
+// (4"–12" primary source; 20" point from a separate worked example, used only to shape extrapolation
+// for larger diameters — treat results above ~12" as more approximate).
+const FD_TABLE = [[4,10],[5,13],[6,16],[8,24],[10,33],[12,49],[20,165]];
+function diameterFactor(D_in) {
+  const t = FD_TABLE;
+  if (D_in <= t[0][0]) return t[0][1];
+  if (D_in >= t[t.length-1][0]) return t[t.length-1][1];
+  for (let i=0;i<t.length-1;i++){
+    if (D_in>=t[i][0] && D_in<=t[i+1][0]){
+      const f=(D_in-t[i][0])/(t[i+1][0]-t[i][0]);
+      return t[i][1]+f*(t[i+1][1]-t[i][1]);
+    }
+  }
+}
+
+const HANGER_BEARING_FACTORS = [
+  { label: "Ball bearing", Fb: 1.0 },
+  { label: "Bronze / babbitt / oil-impregnated wood", Fb: 1.7 },
+  { label: "Plastic / nylon / teflon", Fb: 2.0 },
+  { label: "No bearing (end-supported only)", Fb: 4.0 },
+];
+
+// "Corrected Material HP" factor — published screw conveyor guides apply an overload correction
+// whenever calculated Material HP is small (<5HP), since torque margin for upset conditions (a
+// choke, a lump) dominates at low power. Anchored on two verified points from a worked example
+// (0.21→0.5 HP and 0.56→1.32 HP, both ≈2.37×) plus no correction needed at the 5HP cutoff.
+// This is an approximation of the published curve's shape from limited extracted data, not a
+// digitization of the full chart — treat as indicative, particularly well above 1 HP (0.75 kW).
+function correctedMaterialHpFactor_kW(mhpKw) {
+  const HP_TO_KW = 0.7457;
+  const pts = [[0.21*HP_TO_KW, 2.38], [0.56*HP_TO_KW, 2.357], [5*HP_TO_KW, 1.0]];
+  if (mhpKw <= pts[0][0]) return pts[0][1];
+  if (mhpKw >= pts[pts.length-1][0]) return 1.0;
+  for (let i=0;i<pts.length-1;i++){
+    if (mhpKw>=pts[i][0] && mhpKw<=pts[i+1][0]){
+      const f=(mhpKw-pts[i][0])/(pts[i+1][0]-pts[i][0]);
+      return pts[i][1]+f*(pts[i+1][1]-pts[i][1]);
+    }
+  }
+  return 1.0;
+}
+
+// Indicative unbalance-motor vibrator sizing (3000 rpm / 2-pole class, generic).
+// Actual selection must come from the vendor's chart for the real wall-plate size.
+const VIBRATOR_TABLE = [
+  { kw: 0.05, forceKgf: 50 },
+  { kw: 0.1, forceKgf: 120 },
+  { kw: 0.2, forceKgf: 300 },
+  { kw: 0.37, forceKgf: 600 },
+  { kw: 0.55, forceKgf: 1000 },
+  { kw: 0.75, forceKgf: 1600 },
+  { kw: 1.1, forceKgf: 2500 },
+  { kw: 1.5, forceKgf: 3800 },
+  { kw: 2.2, forceKgf: 5500 },
+];
+
+function nearestVibrator(forceKgf) {
+  for (const v of VIBRATOR_TABLE) if (v.forceKgf >= forceKgf) return v;
+  return VIBRATOR_TABLE[VIBRATOR_TABLE.length - 1];
+}
+
+// ================= ASME BPVC SEC. VIII DIV. 1 — TANK/VESSEL HELPERS =================
+const MATERIAL_PRESETS = [
+  { label: "SA-516-70 (CS plate)", S: 138 },
+  { label: "SA-515-70 (CS plate)", S: 131 },
+  { label: "SA-283-C (CS plate)", S: 92 },
+  { label: "SA-240-304 (SS)", S: 129 },
+  { label: "SA-240-304L (SS)", S: 115 },
+  { label: "SA-240-316 (SS)", S: 138 },
+  { label: "SA-240-316L (SS)", S: 115 },
+  { label: "Custom…", S: null },
+];
+
+const JOINT_EFFICIENCIES = [
+  { label: "Full radiography (E = 1.00)", E: 1.0 },
+  { label: "Spot radiography (E = 0.85)", E: 0.85 },
+  { label: "No radiography (E = 0.70)", E: 0.7 },
+];
+
+const HEAD_TYPES = ["Flat", "2:1 Ellipsoidal", "Hemispherical", "Torispherical (F&D)"];
+
+// Volume + depth (sagitta) for each head type. D in metres. Returns { depth_m, volume_m3 }.
+function headGeometry(type, D, ellipRatio, torisL_D, torisR_D) {
+  if (type === "Flat") return { depth_m: 0, volume_m3: 0 };
+  if (type === "Hemispherical") {
+    const h = D / 2;
+    return { depth_m: h, volume_m3: (Math.PI * D ** 3) / 12 };
+  }
+  if (type === "2:1 Ellipsoidal") {
+    const h = D / (2 * ellipRatio);
+    return { depth_m: h, volume_m3: (Math.PI * D * D * h) / 6 };
+  }
+  // Torispherical (ASME F&D) — exact via numerical integration of the axisymmetric profile
+  const L = torisL_D * D;
+  const r = torisR_D * D;
+  const sf = L - Math.sqrt((L - r) ** 2 - (D / 2 - r) ** 2);
+  const zt = (r * (L - sf)) / (L - r);
+  const steps = 800;
+  const dz = sf / steps;
+  let vol = 0;
+  for (let i = 0; i < steps; i++) {
+    const z = (i + 0.5) * dz;
+    let rho;
+    if (z <= zt) rho = (D / 2 - r) + Math.sqrt(Math.max(0, r * r - z * z));
+    else rho = Math.sqrt(Math.max(0, L * L - (z - (sf - L)) ** 2));
+    vol += Math.PI * rho * rho * dz;
+  }
+  return { depth_m: sf, volume_m3: vol };
+}
+
+// Required thickness (mm) per ASME BPVC Sec. VIII Div.1, given P,S in MPa and D,L,CA in mm.
+function headReqThickness(type, P, S, E, D, ellipRatio, torisL_D, flatC, CA) {
+  if (type === "Flat") return D * Math.sqrt((flatC * P) / (S * E)) + CA;
+  if (type === "Hemispherical") return (P * (D / 2)) / (2 * S * E - 0.2 * P) + CA;
+  if (type === "2:1 Ellipsoidal") {
+    const K = (1 / 6) * (2 + ellipRatio ** 2);
+    return (P * D * K) / (2 * S * E - 0.2 * P) + CA;
+  }
+  // Torispherical
+  const L = torisL_D * D;
+  return (0.885 * P * L) / (S * E - 0.1 * P) + CA;
+}
+
+// MAWP (MPa) for a given corroded thickness tc (mm), inverse of the above.
+function headMawp(type, tc, S, E, D, ellipRatio, torisL_D, flatC) {
+  if (type === "Flat") return (tc * tc * S * E) / (D * D * flatC);
+  if (type === "Hemispherical") return (2 * S * E * tc) / (D / 2 + 0.2 * tc);
+  if (type === "2:1 Ellipsoidal") {
+    const K = (1 / 6) * (2 + ellipRatio ** 2);
+    return (2 * S * E * tc) / (D * K + 0.2 * tc);
+  }
+  const L = torisL_D * D;
+  return (S * E * tc) / (0.885 * L + 0.1 * tc);
+}
+
+function nearestStandardMotor(kw) {
+  for (const m of STD_MOTORS_KW) if (m >= kw) return m;
+  return STD_MOTORS_KW[STD_MOTORS_KW.length - 1];
+}
+
+function nearestGearboxAtOrBelow(ratio) {
+  let best = STD_GEARBOX_RATIOS[0];
+  for (const g of STD_GEARBOX_RATIOS) if (g <= ratio) best = g;
+  return best;
+}
+
+function nearestGearboxRatio(ratio) {
+  let best = STD_GEARBOX_RATIOS[0], bestDiff = Infinity;
+  for (const g of STD_GEARBOX_RATIOS) {
+    const diff = Math.abs(g - ratio);
+    if (diff < bestDiff) { bestDiff = diff; best = g; }
+  }
+  return best;
+}
+
+function fmt(n, d = 2) {
+  if (!isFinite(n)) return "—";
+  return n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+
+// ---------- shared UI atoms ----------
+function Field({ label, unit, value, onChange, step = "any", min, hint }) {
+  return (
+    <label className="block mb-3">
+      <div className="flex items-baseline justify-between mb-1">
+        <span className="text-[11px] uppercase tracking-wider text-neutral-400 font-semibold">{label}</span>
+        {unit && <span className="text-[10px] text-neutral-500 font-mono">{unit}</span>}
+      </div>
+      <input
+        type="number"
+        step={step}
+        min={min}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="w-full bg-neutral-900 border border-neutral-700 focus:border-amber-500 focus:outline-none rounded px-3 py-2 text-neutral-100 font-mono text-sm"
+      />
+      {hint && <div className="text-[10px] text-neutral-500 mt-1">{hint}</div>}
+    </label>
+  );
+}
+
+function Select({ label, value, onChange, options }) {
+  return (
+    <label className="block mb-3">
+      <div className="text-[11px] uppercase tracking-wider text-neutral-400 font-semibold mb-1">{label}</div>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-neutral-900 border border-neutral-700 focus:border-amber-500 focus:outline-none rounded px-3 py-2 text-neutral-100 font-mono text-sm"
+      >
+        {options.map((o) => (
+          <option key={o.label} value={o.label}>{o.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function Plate({ title, children }) {
+  return (
+    <div className="bg-neutral-900/60 border border-neutral-700 rounded-md p-4 mb-4">
+      <div className="text-[11px] uppercase tracking-[0.15em] text-amber-500 font-bold mb-3 border-b border-neutral-700 pb-2">
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Readout({ label, value, unit, big }) {
+  return (
+    <div className="flex items-baseline justify-between py-1.5 border-b border-neutral-800 last:border-0">
+      <span className="text-xs text-neutral-400">{label}</span>
+      <span className={`font-mono text-neutral-100 ${big ? "text-lg font-bold text-amber-400" : "text-sm"}`}>
+        {value} <span className="text-neutral-500 text-xs">{unit}</span>
+      </span>
+    </div>
+  );
+}
+
+function SubHeader({ children }) {
+  return (
+    <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mt-5 mb-2 pt-3 border-t border-neutral-800 first:mt-0 first:pt-0 first:border-0">
+      {children}
+    </div>
+  );
+}
+
+function StickyResults({ items }) {
+  return (
+    <div className="sticky top-0 z-20 bg-neutral-950/95 backdrop-blur border border-neutral-700 rounded-md px-3 py-2 mb-4 flex flex-wrap gap-x-5 gap-y-1">
+      {items.map((it, i) => (
+        <div key={i} className="flex items-baseline gap-1.5">
+          <span className="text-[10px] uppercase tracking-wide text-neutral-500">{it.label}</span>
+          <span className={`font-mono font-bold ${it.warn ? "text-red-400" : "text-amber-400"}`}>
+            {it.value} <span className="text-neutral-500 text-[10px] font-normal">{it.unit}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ================= BELT CONVEYOR MODULE =================
+function BeltConveyorPanel({ capacityTPH, setCapacityTPH }) {
+  const [densityPreset, setDensityPreset] = useState("Wood chip (biomass)");
+  const [customDensity, setCustomDensity] = useState(300);
+  const [beltWidth, setBeltWidth] = useState(500);
+  const [sidewallHeight, setSidewallHeight] = useState(150);
+  const [shapeFactor, setShapeFactor] = useState(0.55);
+  const [beltSpeed, setBeltSpeed] = useState(1.0);
+  const [length, setLength] = useState(12);
+  const [angle, setAngle] = useState(60);
+  const [frictionFactor, setFrictionFactor] = useState(0.035);
+  const [beltWeightPerM, setBeltWeightPerM] = useState(15);
+  const [skirtResistance, setSkirtResistance] = useState(300);
+  const [driveEff, setDriveEff] = useState(0.9);
+  const [serviceFactor, setServiceFactor] = useState(1.25);
+  const [pulleyDia, setPulleyDia] = useState(315);
+  const [motorRpm, setMotorRpm] = useState(1450);
+  const [driveType, setDriveType] = useState("sprocket"); // 'direct' | 'sprocket'
+  const [driverTeeth, setDriverTeeth] = useState(15);
+
+  const density = densityPreset === "Custom…" ? customDensity : BULK_DENSITY_PRESETS.find(p => p.label === densityPreset)?.value ?? customDensity;
+
+  const r = useMemo(() => {
+    const A = (beltWidth / 1000) * (sidewallHeight / 1000) * shapeFactor; // m2
+    const geomCapacity_m3hr = A * beltSpeed * 3600;
+    const geomCapacity_TPH = geomCapacity_m3hr * density / 1000;
+
+    const H = length * Math.sin((angle * Math.PI) / 180);
+    const qm = (capacityTPH * 1000) / 3600; // kg/s
+
+    const Wm = qm / beltSpeed; // material mass per metre of belt (kg/m)
+    const Wb = beltWeightPerM; // belt mass per metre, single strand (kg/m)
+
+    const Te_lift_N = qm * 9.81 * H; // material lift only — empty belt self-cancels around the loop
+    const Te_stdFriction_N = frictionFactor * 9.81 * length * (2 * Wb + Wm); // idler/roller drag on belt + material
+    const Te_skirt_N = skirtResistance * length; // sidewall/skirt rubbing seal drag — load-independent
+    const Te_total_N = Te_lift_N + Te_stdFriction_N + Te_skirt_N;
+
+    const P_lift_kW = Te_lift_N * beltSpeed / 1000;
+    const P_fric_kW = Te_stdFriction_N * beltSpeed / 1000;
+    const P_skirt_kW = Te_skirt_N * beltSpeed / 1000;
+    const P_shaft_kW = (Te_total_N * beltSpeed) / 1000 / driveEff;
+    const P_motor_kW = P_shaft_kW * serviceFactor;
+    const P_motor_HP = P_motor_kW / 0.7457;
+    const motorSelected = nearestStandardMotor(P_motor_kW);
+
+    const pulleyRpm = (beltSpeed * 60) / (Math.PI * (pulleyDia / 1000));
+    const overallRatio = motorRpm / pulleyRpm;
+
+    let gearboxSelected, trimRatio, drivenTeeth, actualTrim, actualOverall, actualPulleyRpm, actualBeltSpeed, speedError, needsSprocket;
+    if (driveType === "direct") {
+      // No sprocket trim available — pick the closest standard gearbox ratio outright.
+      gearboxSelected = nearestGearboxRatio(overallRatio);
+      trimRatio = 1; drivenTeeth = driverTeeth; actualTrim = 1;
+      actualOverall = gearboxSelected;
+      actualPulleyRpm = motorRpm / actualOverall;
+      actualBeltSpeed = (actualPulleyRpm * Math.PI * (pulleyDia / 1000)) / 60;
+      speedError = ((actualBeltSpeed - beltSpeed) / beltSpeed) * 100;
+      needsSprocket = false;
+    } else {
+      gearboxSelected = nearestGearboxAtOrBelow(overallRatio);
+      trimRatio = overallRatio / gearboxSelected;
+      drivenTeeth = Math.round(driverTeeth * trimRatio);
+      actualTrim = drivenTeeth / driverTeeth;
+      actualOverall = gearboxSelected * actualTrim;
+      actualPulleyRpm = motorRpm / actualOverall;
+      actualBeltSpeed = (actualPulleyRpm * Math.PI * (pulleyDia / 1000)) / 60;
+      speedError = ((actualBeltSpeed - beltSpeed) / beltSpeed) * 100;
+      needsSprocket = Math.abs(trimRatio - 1) > 0.03;
+    }
+
+    return {
+      A, geomCapacity_m3hr, geomCapacity_TPH, H,
+      P_lift_kW, P_fric_kW, P_skirt_kW, P_shaft_kW, P_motor_kW, P_motor_HP, motorSelected,
+      pulleyRpm, overallRatio, gearboxSelected, trimRatio, drivenTeeth, actualTrim,
+      actualOverall, actualPulleyRpm, actualBeltSpeed, speedError, needsSprocket,
+    };
+  }, [capacityTPH, density, beltWidth, sidewallHeight, shapeFactor, beltSpeed, length, angle, frictionFactor, beltWeightPerM, skirtResistance, driveEff, serviceFactor, pulleyDia, motorRpm, driveType, driverTeeth]);
+
+  const capacityWarning = r.geomCapacity_TPH < capacityTPH * 0.98;
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "Motor", value: fmt(r.motorSelected,2), unit: "kW" },
+        { label: "Gearbox", value: fmt(r.gearboxSelected,1), unit: ":1" },
+        { label: "Belt speed", value: fmt(beltSpeed,2), unit: "m/s" },
+        ...(capacityWarning ? [{ label: "Capacity", value: "short", unit: "", warn: true }] : []),
+      ]} />
+
+      <Plate title="Inputs">
+        <SubHeader>Material & duty</SubHeader>
+        <Field label="Target capacity" unit="TPH" value={capacityTPH} onChange={setCapacityTPH} />
+        <Select label="Material (bulk density)" value={densityPreset} onChange={setDensityPreset} options={BULK_DENSITY_PRESETS} />
+        {densityPreset === "Custom…" && (
+          <Field label="Bulk density" unit="kg/m³" value={customDensity} onChange={setCustomDensity} />
+        )}
+
+        <SubHeader>Belt & pocket geometry</SubHeader>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Belt width" unit="mm" value={beltWidth} onChange={setBeltWidth} />
+          <Field label="Sidewall height" unit="mm" value={sidewallHeight} onChange={setSidewallHeight} />
+        </div>
+        <Field label="Fill / shape factor" unit="0–1" step="0.01" value={shapeFactor} onChange={setShapeFactor} hint="Fraction of belt-width × sidewall-height box actually filled. 0.45–0.65 typical for cleated sidewall belts." />
+        <Field label="Belt speed" unit="m/s" step="0.05" value={beltSpeed} onChange={setBeltSpeed} hint="Sidewall belts usually run 0.5–2.0 m/s to limit spillage." />
+
+        <SubHeader>Layout & resistance</SubHeader>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Conveyor length (slope)" unit="m" value={length} onChange={setLength} />
+          <Field label="Incline angle" unit="deg" value={angle} onChange={setAngle} />
+        </div>
+        <Field label="Friction factor (idlers/rollers)" unit="—" step="0.005" value={frictionFactor} onChange={setFrictionFactor} hint="Rolling resistance coefficient for belt+material over idlers. 0.02–0.04 typical." />
+        <Field label="Belt weight (single strand)" unit="kg/m" step="0.5" value={beltWeightPerM} onChange={setBeltWeightPerM} hint="Sidewall/cleated belting is heavy — corrugated sidewalls, cleats, thick covers. Often 10–30 kg/m depending on width/height/rating; get this from the belt manufacturer's data sheet if possible." />
+        <Field label="Sidewall/skirt rubbing resistance" unit="N/m" step="10" value={skirtResistance} onChange={setSkirtResistance} hint="Drag from rubbing skirts/seals against the sidewalls — usually the dominant resistance term on this belt type, and roughly independent of load. Verify against seal type/pressure; 150–600 N/m is a common range." />
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Drive efficiency" unit="0–1" step="0.01" value={driveEff} onChange={setDriveEff} />
+          <Field label="Service factor" unit="×" step="0.05" value={serviceFactor} onChange={setServiceFactor} />
+        </div>
+
+        <SubHeader>Gear ratio / sprocket</SubHeader>
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setDriveType("direct")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${driveType === "direct" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Direct to gearbox</button>
+          <button onClick={() => setDriveType("sprocket")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${driveType === "sprocket" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Gearbox + sprocket trim</button>
+        </div>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Pulley diameter" unit="mm" value={pulleyDia} onChange={setPulleyDia} />
+          <Select label="Motor sync speed" value={String(motorRpm)} onChange={(v) => setMotorRpm(parseFloat(v))} options={SYNC_RPM.map(v => ({ label: String(v) }))} />
+        </div>
+        {driveType === "sprocket" && (
+          <Field label="Drive sprocket teeth (assumed)" unit="T" value={driverTeeth} onChange={setDriverTeeth} />
+        )}
+      </Plate>
+
+      <Plate title="Capacity check">
+        <Readout label="Geometry-derived capacity" value={fmt(r.geomCapacity_m3hr,1)} unit="m³/hr" />
+        <Readout label="Geometry-derived capacity" value={fmt(r.geomCapacity_TPH,2)} unit="TPH" />
+        <Readout label="Lift height" value={fmt(r.H,2)} unit="m" />
+        {capacityWarning && (
+          <div className="mt-2 text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1.5">
+            Geometry gives less capacity than target — increase belt width, sidewall height, fill factor, or speed.
+          </div>
+        )}
+      </Plate>
+
+      <Plate title="Power & motor selection">
+        <Readout label="Power to lift material" value={fmt(r.P_lift_kW,2)} unit="kW" />
+        <Readout label="Power — idler/roller friction" value={fmt(r.P_fric_kW,2)} unit="kW" />
+        <Readout label="Power — sidewall/skirt rubbing" value={fmt(r.P_skirt_kW,2)} unit="kW" />
+        <Readout label="Shaft power (÷ drive eff.)" value={fmt(r.P_shaft_kW,2)} unit="kW" />
+        <Readout label="Required motor power" value={fmt(r.P_motor_kW,2)} unit="kW" />
+        <Readout label="Required motor power" value={fmt(r.P_motor_HP,2)} unit="HP" />
+        <Readout label="Selected standard motor" value={fmt(r.motorSelected,2)} unit="kW" big />
+      </Plate>
+
+      <Plate title="Gear ratio / sprocket selection">
+        <Readout label="Required pulley speed" value={fmt(r.pulleyRpm,2)} unit="rpm" />
+        <Readout label="Overall reduction required" value={fmt(r.overallRatio,2)} unit=":1" />
+        <Readout label="Selected gearbox ratio" value={fmt(r.gearboxSelected,1)} unit=":1" big />
+        {driveType === "direct" ? (
+          <>
+            <Readout label="Actual belt speed achieved" value={fmt(r.actualBeltSpeed,3)} unit="m/s" />
+            <Readout label="Speed deviation from target" value={fmt(r.speedError,2)} unit="%" />
+            {Math.abs(r.speedError) > 5 && (
+              <div className="mt-2 text-[11px] text-amber-400 bg-amber-950/30 border border-amber-900 rounded px-2 py-1.5">
+                Direct-to-gearbox deviation exceeds 5% — standard ratios don't land close to target here.
+                Switch to gearbox + sprocket trim for a precise match, or check for a non-standard ratio option.
+              </div>
+            )}
+          </>
+        ) : r.needsSprocket ? (
+          <>
+            <Readout label="Sprocket trim ratio needed" value={fmt(r.trimRatio,3)} unit=":1" />
+            <Readout label="Driven sprocket" value={`${driverTeeth}T → ${r.drivenTeeth}T`} unit="" />
+            <Readout label="Actual belt speed achieved" value={fmt(r.actualBeltSpeed,3)} unit="m/s" />
+            <Readout label="Speed deviation from target" value={fmt(r.speedError,2)} unit="%" />
+          </>
+        ) : (
+          <div className="mt-2 text-[11px] text-emerald-400 bg-emerald-950/30 border border-emerald-900 rounded px-2 py-1.5">
+            Gearbox ratio alone is within 3% of target — no trim sprocket needed, couple direct.
+          </div>
+        )}
+      </Plate>
+    </div>
+  );
+}
+
+// ================= SCREW CONVEYOR MODULE =================
+function ScrewConveyorPanel({ beltCapacityTPH }) {
+  const [mode, setMode] = useState("rpmToCapacity"); // 'rpmToCapacity' | 'targetToRpm' | 'matchBelt'
+  const [diaD, setDiaD] = useState(300);
+  const [shaftD, setShaftD] = useState(89);
+  const [pitch, setPitch] = useState(300);
+  const [loadingEff, setLoadingEff] = useState(0.32);
+  const [inclineDeg, setInclineDeg] = useState(0);
+  const [densityPreset, setDensityPreset] = useState("Wood chip (biomass)");
+  const [customDensity, setCustomDensity] = useState(300);
+  const [rpm, setRpm] = useState(40);
+  const [targetTPH, setTargetTPH] = useState(15);
+  const [convLength, setConvLength] = useState(8);
+  const [liftHeight, setLiftHeight] = useState(0);
+  const [materialFactor, setMaterialFactor] = useState(2.5);
+  const [powerEff, setPowerEff] = useState(0.85);
+  const [screwServiceFactor, setScrewServiceFactor] = useState(1.2);
+  const [hangerBearing, setHangerBearing] = useState("Bronze / babbitt / oil-impregnated wood");
+  const [motorRpm, setMotorRpm] = useState(1450);
+  const [driveType, setDriveType] = useState("sprocket"); // 'direct' | 'sprocket'
+  const [driverTeeth, setDriverTeeth] = useState(15);
+
+  const density = densityPreset === "Custom…" ? customDensity : BULK_DENSITY_PRESETS.find(p => p.label === densityPreset)?.value ?? customDensity;
+
+  const r = useMemo(() => {
+    const A = (Math.PI / 4) * ((diaD / 1000) ** 2 - (shaftD / 1000) ** 2); // m2
+    const kfactor = inclineFactor(inclineDeg);
+    const perRpm_m3hr = A * (pitch / 1000) * 60 * loadingEff * kfactor; // m3/hr per 1 rpm
+
+    let usedRpm, capacity_m3hr, capacity_TPH;
+    const targetForMatch = mode === "matchBelt" ? beltCapacityTPH : targetTPH;
+    if (mode === "rpmToCapacity") {
+      usedRpm = rpm;
+      capacity_m3hr = perRpm_m3hr * rpm;
+      capacity_TPH = (capacity_m3hr * density) / 1000;
+    } else {
+      capacity_TPH = targetForMatch;
+      capacity_m3hr = (targetForMatch * 1000) / density;
+      usedRpm = perRpm_m3hr > 0 ? capacity_m3hr / perRpm_m3hr : 0;
+    }
+
+    const maxRpmGuideline = screwMaxRpmGuideline(diaD);
+    const overspeed = usedRpm > maxRpmGuideline;
+
+    // Material HP (before correction) + lift component
+    const MHP_kW_raw = (capacity_TPH * convLength * materialFactor) / 367
+                      + (capacity_TPH * liftHeight * 2) / 367;
+    const overloadFactor = correctedMaterialHpFactor_kW(MHP_kW_raw);
+    const MHP_kW_corrected = MHP_kW_raw * overloadFactor;
+
+    // Friction HP — diameter- and speed-dependent, was previously missing entirely
+    const Fd = diameterFactor(diaD / 25.4);
+    const Fb = HANGER_BEARING_FACTORS.find(h => h.label === hangerBearing)?.Fb ?? 1.7;
+    const FHP_kW = convLength * usedRpm * Fd * Fb * 2.44622e-6;
+
+    const P_kW_running = (MHP_kW_corrected + FHP_kW) / powerEff;
+    const P_kW = P_kW_running * screwServiceFactor;
+    const P_HP = P_kW / 0.7457;
+
+    // Drive selection — screw shaft target speed is usedRpm itself (no pulley conversion needed)
+    const overallRatio = usedRpm > 0 ? motorRpm / usedRpm : 0;
+    let gearboxSelected, trimRatio, drivenTeeth, actualTrim, actualOverall, actualShaftRpm, speedError, needsSprocket;
+    if (driveType === "direct") {
+      gearboxSelected = nearestGearboxRatio(overallRatio);
+      trimRatio = 1; drivenTeeth = driverTeeth; actualTrim = 1;
+      actualOverall = gearboxSelected;
+      actualShaftRpm = actualOverall > 0 ? motorRpm / actualOverall : 0;
+      speedError = usedRpm > 0 ? ((actualShaftRpm - usedRpm) / usedRpm) * 100 : 0;
+      needsSprocket = false;
+    } else {
+      gearboxSelected = nearestGearboxAtOrBelow(overallRatio);
+      trimRatio = gearboxSelected > 0 ? overallRatio / gearboxSelected : 0;
+      drivenTeeth = Math.round(driverTeeth * trimRatio);
+      actualTrim = drivenTeeth / driverTeeth;
+      actualOverall = gearboxSelected * actualTrim;
+      actualShaftRpm = actualOverall > 0 ? motorRpm / actualOverall : 0;
+      speedError = usedRpm > 0 ? ((actualShaftRpm - usedRpm) / usedRpm) * 100 : 0;
+      needsSprocket = Math.abs(trimRatio - 1) > 0.03;
+    }
+
+    return { A, kfactor, perRpm_m3hr, usedRpm, capacity_m3hr, capacity_TPH, maxRpmGuideline, overspeed,
+             MHP_kW_raw, overloadFactor, MHP_kW_corrected, Fd, Fb, FHP_kW, P_kW_running, P_kW, P_HP,
+             overallRatio, gearboxSelected, trimRatio, drivenTeeth, actualTrim, actualOverall, actualShaftRpm, speedError, needsSprocket };
+  }, [diaD, shaftD, pitch, loadingEff, inclineDeg, density, mode, rpm, targetTPH, beltCapacityTPH, convLength, liftHeight, materialFactor, powerEff, screwServiceFactor, hangerBearing, motorRpm, driveType, driverTeeth]);
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "Speed", value: fmt(r.usedRpm,1), unit: "rpm", warn: r.overspeed },
+        { label: "Flow", value: fmt(r.capacity_TPH,2), unit: "TPH" },
+        { label: "Motor", value: fmt(nearestStandardMotor(r.P_kW),2), unit: "kW" },
+      ]} />
+
+      <Plate title="Inputs">
+        <SubHeader>Solve for</SubHeader>
+        <div className="flex flex-col gap-2 mb-3">
+          <button
+            onClick={() => setMode("rpmToCapacity")}
+            className={`w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border ${mode === "rpmToCapacity" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}
+          >
+            RPM → Capacity
+          </button>
+          <button
+            onClick={() => setMode("targetToRpm")}
+            className={`w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border ${mode === "targetToRpm" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}
+          >
+            Target flow → RPM
+          </button>
+          <button
+            onClick={() => setMode("matchBelt")}
+            className={`w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border ${mode === "matchBelt" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}
+          >
+            🔗 Match belt conveyor feed rate
+          </button>
+        </div>
+        {mode === "rpmToCapacity" && (
+          <Field label="Screw speed" unit="rpm" value={rpm} onChange={setRpm} />
+        )}
+        {mode === "targetToRpm" && (
+          <Field label="Target mass flow" unit="TPH" value={targetTPH} onChange={setTargetTPH} />
+        )}
+        {mode === "matchBelt" && (
+          <div className="text-[11px] text-sky-400 bg-sky-950/30 border border-sky-900 rounded px-2 py-2">
+            Synced to Belt Conveyor tab's target capacity: <span className="font-mono font-bold">{fmt(beltCapacityTPH, 2)} TPH</span>.
+            Change it on the Belt tab and this screw's required RPM updates automatically.
+          </div>
+        )}
+
+        <SubHeader>Screw geometry</SubHeader>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Screw outer dia." unit="mm" value={diaD} onChange={setDiaD} />
+          <Field label="Shaft/pipe dia." unit="mm" value={shaftD} onChange={setShaftD} />
+        </div>
+        <Field label="Pitch" unit="mm" value={pitch} onChange={setPitch} hint="Standard pitch is usually = screw diameter (full pitch)." />
+        <Field label="Loading (fill) efficiency" unit="0–1" step="0.01" value={loadingEff} onChange={setLoadingEff} hint="0.15 (abrasive/sluggish) – 0.45 (free-flowing, non-abrasive). Biomass chips/sawdust ≈ 0.30–0.35." />
+        <Field label="Incline angle" unit="deg" value={inclineDeg} onChange={setInclineDeg} hint={`Derating factor at this angle: ${fmt(inclineFactor(inclineDeg),2)}`} />
+
+        <SubHeader>Material</SubHeader>
+        <Select label="Material (bulk density)" value={densityPreset} onChange={setDensityPreset} options={BULK_DENSITY_PRESETS} />
+        {densityPreset === "Custom…" && (
+          <Field label="Bulk density" unit="kg/m³" value={customDensity} onChange={setCustomDensity} />
+        )}
+
+        <SubHeader>For power estimate</SubHeader>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Conveyor length" unit="m" value={convLength} onChange={setConvLength} />
+          <Field label="Lift height" unit="m" value={liftHeight} onChange={setLiftHeight} />
+        </div>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Material factor λ" unit="—" step="0.1" value={materialFactor} onChange={setMaterialFactor} hint="~1.2 sawdust, 2–3 wood chip, 3–4 abrasive/EFB." />
+          <Field label="Drive efficiency" unit="0–1" step="0.01" value={powerEff} onChange={setPowerEff} />
+        </div>
+        <Field label="Service factor" unit="×" step="0.05" value={screwServiceFactor} onChange={setScrewServiceFactor} hint="Margin for starting torque under a full/loaded screw, wear, and minor blockages. 1.15–1.5 typical." />
+        <Select label="Hanger bearing type" value={hangerBearing} onChange={setHangerBearing} options={HANGER_BEARING_FACTORS.map(h => ({ label: h.label }))} />
+
+        <SubHeader>Drive selection</SubHeader>
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setDriveType("direct")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${driveType === "direct" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Direct to gearbox</button>
+          <button onClick={() => setDriveType("sprocket")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${driveType === "sprocket" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Gearbox + sprocket trim</button>
+        </div>
+        <Select label="Motor sync speed" value={String(motorRpm)} onChange={(v) => setMotorRpm(parseFloat(v))} options={SYNC_RPM.map(v => ({ label: String(v) }))} />
+        {driveType === "sprocket" && (
+          <Field label="Drive sprocket teeth (assumed)" unit="T" value={driverTeeth} onChange={setDriverTeeth} />
+        )}
+      </Plate>
+
+      <Plate title="Speed & mass flow result">
+        <Readout label="Cross-section area (annulus)" value={fmt(r.A * 1e4,1)} unit="cm²" />
+        <Readout label="Incline derating factor" value={fmt(r.kfactor,2)} unit="" />
+        <Readout label={mode === "rpmToCapacity" ? "Screw speed (input)" : mode === "matchBelt" ? "Required speed (belt-matched)" : "Required screw speed"} value={fmt(r.usedRpm,1)} unit="rpm" big />
+        <Readout label="Volumetric capacity" value={fmt(r.capacity_m3hr,2)} unit="m³/hr" />
+        <Readout label="Mass flow" value={fmt(r.capacity_TPH,2)} unit="TPH" big />
+        <Readout label="Guideline max speed for this dia." value={fmt(r.maxRpmGuideline,0)} unit="rpm" />
+        {r.overspeed && (
+          <div className="mt-2 text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1.5">
+            Required speed exceeds typical guideline max for this diameter — consider a larger screw or coarser pitch.
+          </div>
+        )}
+      </Plate>
+
+      <Plate title="Estimated drive power">
+        <Readout label="Material HP (raw)" value={fmt(r.MHP_kW_raw,3)} unit="kW" />
+        <Readout label="Overload correction factor" value={fmt(r.overloadFactor,2)} unit="×" />
+        <Readout label="Material HP (corrected)" value={fmt(r.MHP_kW_corrected,3)} unit="kW" />
+        <Readout label="Friction HP (diameter/speed dependent)" value={fmt(r.FHP_kW,3)} unit="kW" />
+        <Readout label="Calculated running power" value={fmt(r.P_kW_running,2)} unit="kW" />
+        <Readout label="With service factor" value={fmt(r.P_kW,2)} unit="kW" />
+        <Readout label="With service factor" value={fmt(r.P_HP,2)} unit="HP" />
+        <Readout label="Nearest standard motor" value={fmt(nearestStandardMotor(r.P_kW),2)} unit="kW" big />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          Uses the published screw conveyor method: Material HP (with the standard "corrected material HP"
+          overload allowance applied below 5 HP) plus a diameter- and speed-dependent Friction HP for the
+          empty screw's own drag. Diameter factor table is verified up to 12"; larger diameters extrapolate
+          from it and are more approximate — cross-check against a manufacturer's own chart for anything final.
+        </div>
+      </Plate>
+
+      <Plate title="Drive selection result">
+        <Readout label="Overall reduction required" value={fmt(r.overallRatio,2)} unit=":1" />
+        <Readout label="Selected gearbox ratio" value={fmt(r.gearboxSelected,1)} unit=":1" big />
+        {driveType === "direct" ? (
+          <>
+            <Readout label="Actual screw speed achieved" value={fmt(r.actualShaftRpm,2)} unit="rpm" />
+            <Readout label="Speed deviation from target" value={fmt(r.speedError,2)} unit="%" />
+            {Math.abs(r.speedError) > 5 && (
+              <div className="mt-2 text-[11px] text-amber-400 bg-amber-950/30 border border-amber-900 rounded px-2 py-1.5">
+                Direct-to-gearbox deviation exceeds 5% — standard ratios don't land close to target here.
+                Switch to gearbox + sprocket trim for a precise match.
+              </div>
+            )}
+          </>
+        ) : r.needsSprocket ? (
+          <>
+            <Readout label="Sprocket trim ratio needed" value={fmt(r.trimRatio,3)} unit=":1" />
+            <Readout label="Driven sprocket" value={`${driverTeeth}T → ${r.drivenTeeth}T`} unit="" />
+            <Readout label="Actual screw speed achieved" value={fmt(r.actualShaftRpm,2)} unit="rpm" />
+            <Readout label="Speed deviation from target" value={fmt(r.speedError,2)} unit="%" />
+          </>
+        ) : (
+          <div className="mt-2 text-[11px] text-emerald-400 bg-emerald-950/30 border border-emerald-900 rounded px-2 py-1.5">
+            Gearbox ratio alone is within 3% of target — no trim sprocket needed, couple direct.
+          </div>
+        )}
+      </Plate>
+
+      <div className="text-[10px] text-neutral-500 leading-relaxed px-1">
+        Simplified sizing estimate (CEMA/DIN-style lumped formulas) for preliminary selection.
+        Confirm final motor, gearbox and screw speed against manufacturer torque/speed curves
+        and CEMA 350 tables before finalizing.
+      </div>
+    </div>
+  );
+}
+
+// ================= 3-VIEW ROUGH DRAWING =================
+function ThreeViewDrawing({ binLength, topWidth, straightHeight, hopperHeight, bottomTroughWidth, showVibrator }) {
+  const margin = 30;
+  const maxDim = Math.max(binLength, topWidth, straightHeight + hopperHeight, 0.5);
+  const px = 220 / maxDim; // pixels per meter, shared across all 3 views
+
+  const totalH = straightHeight + hopperHeight;
+  const dim = (v) => v * px;
+
+  // ---- View A: front elevation (trapezoid — taper across width, screw axis into the page) ----
+  const svgAw = dim(topWidth) + margin * 2;
+  const svgAh = dim(totalH) + margin * 2 + 20;
+  const topL = margin, topR = margin + dim(topWidth);
+  const midY = margin + dim(straightHeight);
+  const botY = margin + dim(totalH);
+  const botL = margin + dim((topWidth - bottomTroughWidth) / 2);
+  const botR = margin + dim((topWidth + bottomTroughWidth) / 2);
+  const vibX = botL + (topL - botL) * 0.4;
+  const vibY = midY + (botY - midY) * 0.45;
+  const shaftCx = (botL + botR) / 2;
+  const shaftCy = botY - dim(hopperHeight) * 0.12;
+
+  // ---- View B: side elevation (rectangle, no taper — extruded along screw length) ----
+  const svgBw = dim(binLength) + margin * 2;
+  const svgBh = dim(totalH) + margin * 2 + 20;
+
+  // ---- View C: plan view (top-down) — trough runs the full bin length ----
+  const svgCw = dim(binLength) + margin * 2;
+  const svgCh = dim(topWidth) + margin * 2 + 20;
+  const slotY1 = margin + dim((topWidth - bottomTroughWidth) / 2);
+  const slotY2 = margin + dim((topWidth + bottomTroughWidth) / 2);
+
+  const strokeMain = "#a8adb5";
+  const strokeDim = "#5b616b";
+  const textDim = { fontSize: 9, fill: "#9aa0a8", fontFamily: "monospace" };
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="bg-neutral-950 border border-neutral-800 rounded p-2">
+        <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1 text-center">Front elevation (taper, screw axis into page)</div>
+        <svg viewBox={`0 0 ${svgAw} ${svgAh}`} className="w-full h-auto">
+          <path
+            d={`M ${topL} ${margin} L ${topR} ${margin} L ${topR} ${midY} L ${botR} ${botY} L ${botL} ${botY} L ${topL} ${midY} Z`}
+            fill="#3a3d43" stroke={strokeMain} strokeWidth="1.5"
+          />
+          <line x1={topL} y1={midY} x2={topR} y2={midY} stroke={strokeDim} strokeDasharray="2,2" />
+          <circle cx={shaftCx} cy={shaftCy} r={Math.max(5, dim(bottomTroughWidth) * 0.18)} fill="#6b6f76" stroke="#cfd2d6" strokeWidth="1" />
+          <text x={shaftCx} y={botY + 14} style={textDim} textAnchor="middle" fill="#c8ccd1">screw</text>
+          {showVibrator && (
+            <g>
+              <rect x={vibX - 7} y={vibY - 5} width="14" height="10" fill="#5B8FA8" stroke="#cfe3ec" strokeWidth="0.5" transform={`rotate(${-Math.atan2(botY-midY, botL-topL)*180/Math.PI} ${vibX} ${vibY})`} />
+              <text x={vibX + 12} y={vibY} style={textDim} fill="#8fc4dc">VIB</text>
+            </g>
+          )}
+          {/* dimension: top width */}
+          <line x1={topL} y1={margin - 10} x2={topR} y2={margin - 10} stroke={strokeDim} />
+          <text x={(topL + topR) / 2} y={margin - 14} style={textDim} textAnchor="middle">{fmt(topWidth,2)} m</text>
+          {/* dimension: straight height */}
+          <text x={topL - 6} y={(margin + midY) / 2} style={textDim} textAnchor="end">{fmt(straightHeight,2)}</text>
+          {/* dimension: hopper height */}
+          <text x={topL - 6} y={(midY + botY) / 2} style={textDim} textAnchor="end">{fmt(hopperHeight,2)}</text>
+          {/* dimension: bottom trough width */}
+          <line x1={botL} y1={botY + 22} x2={botR} y2={botY + 22} stroke={strokeDim} />
+          <text x={(botL + botR) / 2} y={botY + 34} style={textDim} textAnchor="middle">{fmt(bottomTroughWidth,2)} m</text>
+        </svg>
+      </div>
+
+      <div className="bg-neutral-950 border border-neutral-800 rounded p-2">
+        <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1 text-center">Side elevation (no taper — extruded)</div>
+        <svg viewBox={`0 0 ${svgBw} ${svgBh}`} className="w-full h-auto">
+          <rect x={margin} y={margin} width={dim(binLength)} height={dim(totalH)} fill="#3a3d43" stroke={strokeMain} strokeWidth="1.5" />
+          <line x1={margin} y1={margin + dim(straightHeight)} x2={margin + dim(binLength)} y2={margin + dim(straightHeight)} stroke={strokeDim} strokeDasharray="2,2" />
+          <line x1={margin} y1={margin - 10} x2={margin + dim(binLength)} y2={margin - 10} stroke={strokeDim} />
+          <text x={margin + dim(binLength) / 2} y={margin - 14} style={textDim} textAnchor="middle">{fmt(binLength,2)} m</text>
+        </svg>
+      </div>
+
+      <div className="bg-neutral-950 border border-neutral-800 rounded p-2">
+        <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1 text-center">Plan view (top-down)</div>
+        <svg viewBox={`0 0 ${svgCw} ${svgCh}`} className="w-full h-auto">
+          <rect x={margin} y={margin} width={dim(binLength)} height={dim(topWidth)} fill="#3a3d43" stroke={strokeMain} strokeWidth="1.5" />
+          <rect x={margin} y={slotY1} width={dim(binLength)} height={slotY2 - slotY1} fill="none" stroke="#e8a33d" strokeDasharray="3,2" strokeWidth="1.5" />
+          <line x1={margin} y1={(slotY1 + slotY2) / 2} x2={margin + dim(binLength)} y2={(slotY1 + slotY2) / 2} stroke="#5B8FA8" strokeWidth="1" markerEnd="url(#arrow)" />
+          <defs>
+            <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" fill="#5B8FA8" />
+            </marker>
+          </defs>
+          <text x={margin + dim(binLength) + 4} y={(slotY1 + slotY2) / 2 + 3} style={textDim} fill="#8fc4dc">screw axis</text>
+          <text x={margin + dim(binLength) / 2} y={margin - 8} style={textDim} textAnchor="middle">{fmt(binLength,2)} m</text>
+          <text x={margin - 6} y={margin + dim(topWidth) / 2} style={textDim} textAnchor="end">{fmt(topWidth,2)}</text>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+// ================= SILO / HOPPER + RECLAIM SCREW MODULE =================
+function SiloHopperPanel() {
+  // geometry — screw runs along the constant "bin length"; taper is across width only
+  const [binLength, setBinLength] = useState(4.0);
+  const [topWidth, setTopWidth] = useState(1.5);
+  const [straightHeight, setStraightHeight] = useState(1.8);
+  const [hopperHeight, setHopperHeight] = useState(1.6);
+  const [bottomTroughWidth, setBottomTroughWidth] = useState(0.5);
+  const [fillFactor, setFillFactor] = useState(0.85);
+  const [minAngleHoriz, setMinAngleHoriz] = useState(60);
+  const [densityPreset, setDensityPreset] = useState("Wood chip (biomass)");
+  const [customDensity, setCustomDensity] = useState(300);
+
+  // consumption / autonomy
+  const [consumptionTPH, setConsumptionTPH] = useState(2.5);
+
+  // reclaim screw
+  const [screwMode, setScrewMode] = useState("consumptionToRpm"); // 'consumptionToRpm' | 'rpmToCapacity'
+  const [diaD, setDiaD] = useState(250);
+  const [shaftD, setShaftD] = useState(76);
+  const [pitch, setPitch] = useState(200);
+  const [loadingEff, setLoadingEff] = useState(0.2);
+  const [rpmInput, setRpmInput] = useState(30);
+  const [materialFactor, setMaterialFactor] = useState(3);
+  const [powerEff, setPowerEff] = useState(0.85);
+  const [reclaimServiceFactor, setReclaimServiceFactor] = useState(1.2);
+  const [hangerBearing, setHangerBearing] = useState("Bronze / babbitt / oil-impregnated wood");
+
+  // vibration motor (anti-bridging)
+  const [includeVibrator, setIncludeVibrator] = useState(false);
+  const [vibMultiplier, setVibMultiplier] = useState(2.5);
+
+  const density = densityPreset === "Custom…" ? customDensity : BULK_DENSITY_PRESETS.find(p => p.label === densityPreset)?.value ?? customDensity;
+
+  const geo = useMemo(() => {
+    const V_straight = binLength * topWidth * straightHeight;
+    const trapArea = ((topWidth + bottomTroughWidth) / 2) * hopperHeight;
+    const V_hopper = trapArea * binLength;
+    const V_total = V_straight + V_hopper;
+    const V_effective = V_total * fillFactor;
+    const mass_kg = V_effective * density;
+    const mass_ton = mass_kg / 1000;
+    const consumption_kg_hr = consumptionTPH * 1000;
+    const autonomy_hr = consumption_kg_hr > 0 ? mass_kg / consumption_kg_hr : Infinity;
+    const autonomy_day = autonomy_hr / 24;
+
+    const horizOffsetPerSide = (topWidth - bottomTroughWidth) / 2;
+    const angleFromVertical = (Math.atan(horizOffsetPerSide / hopperHeight) * 180) / Math.PI;
+    const angleFromHorizontal = 90 - angleFromVertical;
+    const flowOk = angleFromHorizontal >= minAngleHoriz;
+
+    return { V_straight, V_hopper, V_total, V_effective, mass_kg, mass_ton, autonomy_hr, autonomy_day, angleFromVertical, angleFromHorizontal, flowOk };
+  }, [binLength, topWidth, straightHeight, hopperHeight, bottomTroughWidth, fillFactor, density, consumptionTPH, minAngleHoriz]);
+
+  const vib = useMemo(() => {
+    const hopperMaterialWeight_kg = geo.V_hopper * fillFactor * density;
+    const requiredForce_kgf = hopperMaterialWeight_kg * vibMultiplier;
+    const requiredForce_N = requiredForce_kgf * 9.81;
+    const selected = nearestVibrator(requiredForce_kgf);
+    return { hopperMaterialWeight_kg, requiredForce_kgf, requiredForce_N, selected };
+  }, [geo.V_hopper, fillFactor, density, vibMultiplier]);
+
+  const screw = useMemo(() => {
+    const A = (Math.PI / 4) * ((diaD / 1000) ** 2 - (shaftD / 1000) ** 2);
+    const perRpm_m3hr = A * (pitch / 1000) * 60 * loadingEff;
+    let usedRpm, capacity_m3hr, capacity_TPH;
+    if (screwMode === "rpmToCapacity") {
+      usedRpm = rpmInput;
+      capacity_m3hr = perRpm_m3hr * rpmInput;
+      capacity_TPH = (capacity_m3hr * density) / 1000;
+    } else {
+      capacity_TPH = consumptionTPH;
+      capacity_m3hr = (consumptionTPH * 1000) / density;
+      usedRpm = perRpm_m3hr > 0 ? capacity_m3hr / perRpm_m3hr : 0;
+    }
+    const maxRpmGuideline = screwMaxRpmGuideline(diaD);
+    const overspeed = usedRpm > maxRpmGuideline;
+    // conveying length = the reclaim screw's actual run length (binLength), not the trough width
+    const MHP_kW_raw = (capacity_TPH * binLength * materialFactor) / 367;
+    const overloadFactor = correctedMaterialHpFactor_kW(MHP_kW_raw);
+    const MHP_kW_corrected = MHP_kW_raw * overloadFactor;
+    const Fd = diameterFactor(diaD / 25.4);
+    const Fb = HANGER_BEARING_FACTORS.find(h => h.label === hangerBearing)?.Fb ?? 1.7;
+    const FHP_kW = binLength * usedRpm * Fd * Fb * 2.44622e-6;
+    const P_kW_running = (MHP_kW_corrected + FHP_kW) / powerEff;
+    const P_kW = P_kW_running * reclaimServiceFactor;
+    const P_HP = P_kW / 0.7457;
+    return { A, perRpm_m3hr, usedRpm, capacity_m3hr, capacity_TPH, maxRpmGuideline, overspeed,
+             MHP_kW_raw, overloadFactor, MHP_kW_corrected, Fd, Fb, FHP_kW, P_kW_running, P_kW, P_HP };
+  }, [diaD, shaftD, pitch, loadingEff, screwMode, rpmInput, consumptionTPH, density, binLength, materialFactor, powerEff, reclaimServiceFactor, hangerBearing]);
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "Storage", value: fmt(geo.mass_ton,2), unit: "t" },
+        { label: "Autonomy", value: fmt(geo.autonomy_hr,1), unit: "hr" },
+        { label: "Wall angle", value: fmt(geo.angleFromHorizontal,1), unit: "°", warn: !geo.flowOk },
+        { label: "Reclaim motor", value: fmt(nearestStandardMotor(screw.P_kW),2), unit: "kW" },
+      ]} />
+
+      <Plate title="Rough general arrangement (3 views)">
+        <ThreeViewDrawing
+          binLength={binLength}
+          topWidth={topWidth}
+          straightHeight={straightHeight}
+          hopperHeight={hopperHeight}
+          bottomTroughWidth={bottomTroughWidth}
+          showVibrator={includeVibrator}
+        />
+        <div className="text-[10px] text-neutral-500 mt-2 leading-relaxed">
+          Schematic, to relative scale from your inputs — not a fabrication drawing. The screw axis runs
+          along the bin length (into the page in the front elevation); the taper is across the width.
+        </div>
+      </Plate>
+
+      <Plate title="Inputs">
+        <SubHeader>Hopper geometry (straight + wedge)</SubHeader>
+        <div className="text-[10px] text-neutral-500 mb-3 leading-relaxed">
+          Wedge-bottom bin: the reclaim screw runs the full bin length (no taper along that axis).
+          The hopper tapers across the width only, down to a trough matching the screw diameter,
+          running the entire bin length underneath.
+        </div>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Bin length (screw axis, constant)" unit="m" step="0.1" value={binLength} onChange={setBinLength} />
+          <Field label="Top width (tapers)" unit="m" step="0.1" value={topWidth} onChange={setTopWidth} />
+        </div>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Straight wall height" unit="m" step="0.1" value={straightHeight} onChange={setStraightHeight} />
+          <Field label="Hopper (taper) height" unit="m" step="0.1" value={hopperHeight} onChange={setHopperHeight} />
+        </div>
+        <Field label="Bottom trough width" unit="m" step="0.05" value={bottomTroughWidth} onChange={setBottomTroughWidth} hint="Width of the discharge trough at the very bottom — matches the screw's outer diameter plus clearance, running the full bin length." />
+        <Field label="Fill factor" unit="0–1" step="0.01" value={fillFactor} onChange={setFillFactor} hint="Usable volume vs full geometric volume — accounts for headspace, bridging clearance, uneven fill." />
+        <Field label="Min. recommended angle from horizontal" unit="deg" value={minAngleHoriz} onChange={setMinAngleHoriz} hint="Rule-of-thumb design minimum, not a substitute for a Jenike flow-property test." />
+
+        <SubHeader>Material & consumption</SubHeader>
+        <Select label="Material (bulk density)" value={densityPreset} onChange={setDensityPreset} options={BULK_DENSITY_PRESETS} />
+        {densityPreset === "Custom…" && (
+          <Field label="Bulk density" unit="kg/m³" value={customDensity} onChange={setCustomDensity} />
+        )}
+        <Field label="Consumption rate" unit="TPH" step="0.1" value={consumptionTPH} onChange={setConsumptionTPH} hint="Boiler/process fuel burn rate — also drives the reclaim screw sizing below." />
+
+        <SubHeader>Reclaim screw feeder</SubHeader>
+        <div className="flex flex-col gap-2 mb-3">
+          <button
+            onClick={() => setScrewMode("consumptionToRpm")}
+            className={`w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border ${screwMode === "consumptionToRpm" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}
+          >
+            🔗 Match consumption → required RPM
+          </button>
+          <button
+            onClick={() => setScrewMode("rpmToCapacity")}
+            className={`w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border ${screwMode === "rpmToCapacity" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}
+          >
+            RPM → Capacity check
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Screw outer dia." unit="mm" value={diaD} onChange={setDiaD} />
+          <Field label="Shaft dia." unit="mm" value={shaftD} onChange={setShaftD} />
+        </div>
+        <Field label="Pitch" unit="mm" value={pitch} onChange={setPitch} />
+        <Field label="Loading (fill) efficiency" unit="0–1" step="0.01" value={loadingEff} onChange={setLoadingEff} hint="Live-bottom reclaim screws typically run lower fill (0.15–0.25) than transfer screws since they draw unevenly along the trough." />
+        {screwMode === "rpmToCapacity" && (
+          <Field label="Screw speed" unit="rpm" value={rpmInput} onChange={setRpmInput} />
+        )}
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Material factor λ" unit="—" step="0.1" value={materialFactor} onChange={setMaterialFactor} />
+          <Field label="Drive efficiency" unit="0–1" step="0.01" value={powerEff} onChange={setPowerEff} />
+        </div>
+        <Field label="Service factor" unit="×" step="0.05" value={reclaimServiceFactor} onChange={setReclaimServiceFactor} hint="Margin for starting torque under a loaded screw, wear, and blockages. 1.15–1.5 typical." />
+        <Select label="Hanger bearing type" value={hangerBearing} onChange={setHangerBearing} options={HANGER_BEARING_FACTORS.map(h => ({ label: h.label }))} />
+
+        <SubHeader>Vibration motor (anti-bridging)</SubHeader>
+        <button
+          onClick={() => setIncludeVibrator(!includeVibrator)}
+          className={`w-full py-2 mb-3 rounded text-xs font-semibold uppercase tracking-wide border ${includeVibrator ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}
+        >
+          {includeVibrator ? "✓ Vibration motor included" : "+ Add vibration motor"}
+        </button>
+        {!geo.flowOk && !includeVibrator && (
+          <div className="mb-3 text-[11px] text-amber-400 bg-amber-950/30 border border-amber-900 rounded px-2 py-1.5">
+            Wall angle is shallow — biomass is prone to bridging here. Consider enabling a vibration motor.
+          </div>
+        )}
+        {includeVibrator && (
+          <Field label="Sizing multiplier (force ÷ static weight)" unit="×" step="0.1" value={vibMultiplier} onChange={setVibMultiplier} hint="Typical hopper wall vibrators are sized at 2–4× the static weight of material bearing on the vibrated panel." />
+        )}
+      </Plate>
+
+      <Plate title="Volume & storage capacity">
+        <Readout label="Straight section volume" value={fmt(geo.V_straight,2)} unit="m³" />
+        <Readout label="Hopper (wedge) volume" value={fmt(geo.V_hopper,2)} unit="m³" />
+        <Readout label="Total geometric volume" value={fmt(geo.V_total,2)} unit="m³" />
+        <Readout label="Effective usable volume" value={fmt(geo.V_effective,2)} unit="m³" big />
+        <Readout label="Storage mass capacity" value={fmt(geo.mass_ton,2)} unit="tonnes" big />
+      </Plate>
+
+      <Plate title="Autonomy">
+        <Readout label="Runtime at set consumption" value={fmt(geo.autonomy_hr,1)} unit="hours" big />
+        <Readout label="Runtime at set consumption" value={fmt(geo.autonomy_day,2)} unit="days" />
+      </Plate>
+
+      <Plate title="Hopper wall flow check">
+        <Readout label="Wall angle from vertical" value={fmt(geo.angleFromVertical,1)} unit="deg" />
+        <Readout label="Wall angle from horizontal" value={fmt(geo.angleFromHorizontal,1)} unit="deg" big />
+        {geo.flowOk ? (
+          <div className="mt-2 text-[11px] text-emerald-400 bg-emerald-950/30 border border-emerald-900 rounded px-2 py-1.5">
+            Wall angle meets your {minAngleHoriz}° minimum — reasonable for reliable gravity flow of biomass.
+            Confirm against actual angle of repose / wall friction for the specific fuel if this is a firm design.
+          </div>
+        ) : (
+          <div className="mt-2 text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1.5">
+            Wall angle is shallower than your {minAngleHoriz}° minimum — biomass (chips, EFB, bark) is prone to
+            bridging/ratholing at shallow angles. Steepen the hopper (more height or narrower trough),
+            or add flow aids (vibrator, air cannon, agitator).
+          </div>
+        )}
+      </Plate>
+
+      {includeVibrator && (
+        <Plate title="Vibration motor result">
+          <Readout label="Material weight in hopper section" value={fmt(vib.hopperMaterialWeight_kg,0)} unit="kg" />
+          <Readout label="Required centrifugal force" value={fmt(vib.requiredForce_kgf,0)} unit="kgf" />
+          <Readout label="Required centrifugal force" value={fmt(vib.requiredForce_N,0)} unit="N" />
+          <Readout label="Indicative vibrator motor" value={fmt(vib.selected.kw,2)} unit="kW" big />
+          <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+            Mount on the lower third of the steepest sloped wall panel, on a stiffened/reinforced plate
+            (isolated from the main structure where possible). This table is a generic 3000 rpm-class
+            reference — confirm final model against the vendor's selection chart for your actual wall
+            plate size and material.
+          </div>
+        </Plate>
+      )}
+
+      <Plate title="Reclaim screw result">
+        <Readout label={screwMode === "rpmToCapacity" ? "Screw speed (input)" : "Required screw speed"} value={fmt(screw.usedRpm,1)} unit="rpm" big />
+        <Readout label="Capacity at this speed" value={fmt(screw.capacity_m3hr,2)} unit="m³/hr" />
+        <Readout label="Mass flow at this speed" value={fmt(screw.capacity_TPH,2)} unit="TPH" />
+        <Readout label="Guideline max speed for this dia." value={fmt(screw.maxRpmGuideline,0)} unit="rpm" />
+        {screw.overspeed && (
+          <div className="mt-2 text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1.5">
+            Required speed exceeds the typical guideline max — use a larger diameter, coarser pitch, or split into two screws.
+          </div>
+        )}
+        <Readout label="Material HP (raw)" value={fmt(screw.MHP_kW_raw,3)} unit="kW" />
+        <Readout label="Overload correction factor" value={fmt(screw.overloadFactor,2)} unit="×" />
+        <Readout label="Material HP (corrected)" value={fmt(screw.MHP_kW_corrected,3)} unit="kW" />
+        <Readout label="Friction HP (diameter/speed dependent)" value={fmt(screw.FHP_kW,3)} unit="kW" />
+        <Readout label="Calculated running power" value={fmt(screw.P_kW_running,2)} unit="kW" />
+        <Readout label="With service factor" value={fmt(screw.P_kW,2)} unit="kW" />
+        <Readout label="Nearest standard motor" value={fmt(nearestStandardMotor(screw.P_kW),2)} unit="kW" big />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          Uses the published screw conveyor method: Material HP (with the standard "corrected material HP"
+          overload allowance below 5 HP) plus a diameter- and speed-dependent Friction HP. Diameter factor
+          table verified to 12"; larger diameters extrapolate and are more approximate.
+        </div>
+      </Plate>
+
+      <div className="text-[10px] text-neutral-500 leading-relaxed px-1">
+        Storage and flow figures assume a single-taper (wedge) hopper matching the trough profile shown.
+        For conical or pyramidal hoppers, or for hard biomass flow-property data, size final geometry with
+        a Jenike shear test rather than the rule-of-thumb angle check above.
+      </div>
+    </div>
+  );
+}
+
+
+function TextField({ label, value, onChange, placeholder, area }) {
+  return (
+    <label className="block mb-3">
+      <div className="text-[11px] uppercase tracking-wider text-neutral-400 font-semibold mb-1">{label}</div>
+      {area ? (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          rows={2}
+          className="w-full bg-neutral-900 border border-neutral-700 focus:border-amber-500 focus:outline-none rounded px-3 py-2 text-neutral-100 text-sm"
+        />
+      ) : (
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full bg-neutral-900 border border-neutral-700 focus:border-amber-500 focus:outline-none rounded px-3 py-2 text-neutral-100 text-sm"
+        />
+      )}
+    </label>
+  );
+}
+
+function HeadInputs({ label, type, setType, ratio, setRatio, torisL, setTorisL, torisR, setTorisR, flatC, setFlatC }) {
+  return (
+    <div className="mb-3 border border-neutral-800 rounded p-2">
+      <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold mb-2">{label}</div>
+      <Select label="Head type" value={type} onChange={setType} options={HEAD_TYPES.map(h => ({ label: h }))} />
+      {type === "2:1 Ellipsoidal" && (
+        <Field label="Ratio D/2h" unit="—" step="0.1" value={ratio} onChange={setRatio} hint="2.0 = standard 2:1 semi-elliptical head." />
+      )}
+      {type === "Torispherical (F&D)" && (
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Crown radius L/D" unit="—" step="0.05" value={torisL} onChange={setTorisL} hint="1.0 = standard ASME F&D." />
+          <Field label="Knuckle radius r/D" unit="—" step="0.01" value={torisR} onChange={setTorisR} hint="0.06 = standard 6% knuckle." />
+        </div>
+      )}
+      {type === "Flat" && (
+        <Field label="Attachment factor C" unit="—" step="0.01" value={flatC} onChange={setFlatC} hint="Per UG-34; 0.33 is a common conservative default — verify against the actual edge/attachment detail." />
+      )}
+    </div>
+  );
+}
+
+function TankVesselPanel() {
+  // identification
+  const [tag, setTag] = useState("T-001");
+  const [service, setService] = useState("Latex Storage Tank");
+  const [description, setDescription] = useState("Horizontal cylindrical storage tank, SUS304, atmospheric.");
+  const [docNo, setDocNo] = useState("");
+  const [rev, setRev] = useState("0");
+
+  // geometry
+  const [idMm, setIdMm] = useState(2000);
+  const [tanTanMm, setTanTanMm] = useState(6000);
+  const [sfPerHead, setSfPerHead] = useState(25);
+
+  const [headAType, setHeadAType] = useState("2:1 Ellipsoidal");
+  const [headARatio, setHeadARatio] = useState(2.0);
+  const [headATorisL, setHeadATorisL] = useState(1.0);
+  const [headATorisR, setHeadATorisR] = useState(0.06);
+  const [headAFlatC, setHeadAFlatC] = useState(0.33);
+
+  const [headBType, setHeadBType] = useState("2:1 Ellipsoidal");
+  const [headBRatio, setHeadBRatio] = useState(2.0);
+  const [headBTorisL, setHeadBTorisL] = useState(1.0);
+  const [headBTorisR, setHeadBTorisR] = useState(0.06);
+  const [headBFlatC, setHeadBFlatC] = useState(0.33);
+
+  // design conditions
+  const [designPBar, setDesignPBar] = useState(3.5);
+  const [designTempC, setDesignTempC] = useState(60);
+  const [materialLabel, setMaterialLabel] = useState("SA-240-304 (SS)");
+  const [customS, setCustomS] = useState(138);
+  const [jointLabel, setJointLabel] = useState("Spot radiography (E = 0.85)");
+  const [caMm, setCaMm] = useState(0);
+
+  // actual/nominal thicknesses for MAWP check
+  const [shellNomMm, setShellNomMm] = useState(8);
+  const [headANomMm, setHeadANomMm] = useState(8);
+  const [headBNomMm, setHeadBNomMm] = useState(8);
+
+  // nozzles
+  const [nozzles, setNozzles] = useState([
+    { tag: "N1", service: "Fill inlet", size: "80A", rating: "150#/SCH40S", location: "Top, near Head A" },
+    { tag: "N2", service: "Outlet", size: "80A", rating: "150#/SCH40S", location: "Bottom, near Head B" },
+    { tag: "MW1", service: "Manway", size: "500 NB", rating: "—", location: "Top, mid-length" },
+  ]);
+  const addNozzle = () => setNozzles([...nozzles, { tag: "", service: "", size: "", rating: "", location: "" }]);
+  const removeNozzle = (i) => setNozzles(nozzles.filter((_, idx) => idx !== i));
+  const updateNozzle = (i, field, val) => setNozzles(nozzles.map((n, idx) => (idx === i ? { ...n, [field]: val } : n)));
+
+  // paint
+  const [surfacePrep, setSurfacePrep] = useState("SSPC-SP6 / Sa2");
+  const [primer, setPrimer] = useState("Epoxy zinc-rich primer, 75 µm DFT");
+  const [topcoat, setTopcoat] = useState("Epoxy topcoat, 100 µm DFT");
+  const [paintColor, setPaintColor] = useState("RAL 7035 (Light Grey)");
+
+  // additional components (manual)
+  const [components, setComponents] = useState([
+    { description: "Magnetic level gauge", qty: "1", notes: "Full length, top-mounted" },
+    { description: "High-level float switch", qty: "1", notes: "SPDT, top nozzle" },
+  ]);
+  const addComponent = () => setComponents([...components, { description: "", qty: "", notes: "" }]);
+  const removeComponent = (i) => setComponents(components.filter((_, idx) => idx !== i));
+  const updateComponent = (i, field, val) => setComponents(components.map((c, idx) => (idx === i ? { ...c, [field]: val } : c)));
+
+  const S = materialLabel === "Custom…" ? customS : MATERIAL_PRESETS.find(m => m.label === materialLabel)?.S ?? customS;
+  const E = JOINT_EFFICIENCIES.find(j => j.label === jointLabel)?.E ?? 1.0;
+  const P_MPa = designPBar * 0.1;
+
+  const calc = useMemo(() => {
+    const D_m = idMm / 1000;
+    const L_m = tanTanMm / 1000;
+    const V_shell = (Math.PI / 4) * D_m * D_m * L_m;
+    const headA = headGeometry(headAType, D_m, headARatio, headATorisL, headATorisR);
+    const headB = headGeometry(headBType, D_m, headBRatio, headBTorisL, headBTorisR);
+    const V_total = V_shell + headA.volume_m3 + headB.volume_m3;
+    const liters = V_total * 1000;
+    const usGal = V_total * 264.172;
+    const ukGal = V_total * 219.969;
+    const OAL_mm = tanTanMm + 2 * sfPerHead + headA.depth_m * 1000 + headB.depth_m * 1000;
+
+    const t_shell_req = (P_MPa * (idMm / 2)) / (S * E - 0.6 * P_MPa) + caMm;
+    const t_headA_req = headReqThickness(headAType, P_MPa, S, E, idMm, headARatio, headATorisL, headAFlatC, caMm);
+    const t_headB_req = headReqThickness(headBType, P_MPa, S, E, idMm, headBRatio, headBTorisL, headBFlatC, caMm);
+
+    const tc_shell = shellNomMm - caMm;
+    const tc_headA = headANomMm - caMm;
+    const tc_headB = headBNomMm - caMm;
+    const mawp_shell = (S * E * tc_shell) / (idMm / 2 + 0.6 * tc_shell) * 10; // MPa -> bar
+    const mawp_headA = headMawp(headAType, tc_headA, S, E, idMm, headARatio, headATorisL, headAFlatC) * 10;
+    const mawp_headB = headMawp(headBType, tc_headB, S, E, idMm, headBRatio, headBTorisL, headBFlatC) * 10;
+    const mawp_governing = Math.min(mawp_shell, mawp_headA, mawp_headB);
+    const hydrotest_bar = 1.3 * mawp_governing;
+
+    return {
+      V_shell, headA, headB, V_total, liters, usGal, ukGal, OAL_mm,
+      t_shell_req, t_headA_req, t_headB_req,
+      mawp_shell, mawp_headA, mawp_headB, mawp_governing, hydrotest_bar,
+    };
+  }, [idMm, tanTanMm, sfPerHead, headAType, headARatio, headATorisL, headATorisR, headAFlatC,
+      headBType, headBRatio, headBTorisL, headBTorisR, headBFlatC, S, E, P_MPa, caMm,
+      shellNomMm, headANomMm, headBNomMm]);
+
+  const shellOk = shellNomMm >= calc.t_shell_req;
+  const headAOk = headANomMm >= calc.t_headA_req;
+  const headBOk = headBNomMm >= calc.t_headB_req;
+
+  return (
+    <div>
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          .print-sheet { display: block !important; }
+          body { background: white; }
+        }
+        .print-sheet { display: none; }
+      `}</style>
+
+      <div className="no-print flex justify-end mb-3">
+        <button
+          onClick={() => window.print()}
+          className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wide bg-emerald-600 text-white hover:bg-emerald-500"
+        >
+          🖨 Print / Save as PDF
+        </button>
+      </div>
+
+      <div className="no-print">
+        <StickyResults items={[
+          { label: "Volume", value: fmt(calc.V_total,2), unit: "m³" },
+          { label: "MAWP", value: fmt(calc.mawp_governing,2), unit: "barg" },
+          { label: "Shell t", value: fmt(shellNomMm,1), unit: "mm", warn: !shellOk },
+        ]} />
+
+        <Plate title="Sizing inputs">
+          <SubHeader>Identification</SubHeader>
+          <div className="grid grid-cols-2 gap-x-3">
+            <TextField label="Tank tag" value={tag} onChange={setTag} />
+            <TextField label="Rev." value={rev} onChange={setRev} />
+          </div>
+          <TextField label="Service" value={service} onChange={setService} />
+          <TextField label="Description" value={description} onChange={setDescription} area />
+          <TextField label="Document no." value={docNo} onChange={setDocNo} placeholder="e.g. TPE-YYH-TANK-001" />
+
+          <SubHeader>Shell geometry</SubHeader>
+          <div className="grid grid-cols-2 gap-x-3">
+            <Field label="Inside diameter" unit="mm" value={idMm} onChange={setIdMm} />
+            <Field label="Tan–tan length" unit="mm" value={tanTanMm} onChange={setTanTanMm} />
+          </div>
+          <Field label="Straight flange (per head)" unit="mm" value={sfPerHead} onChange={setSfPerHead} />
+
+          <SubHeader>Head A (left)</SubHeader>
+          <HeadInputs label="Head A" type={headAType} setType={setHeadAType} ratio={headARatio} setRatio={setHeadARatio}
+            torisL={headATorisL} setTorisL={setHeadATorisL} torisR={headATorisR} setTorisR={setHeadATorisR}
+            flatC={headAFlatC} setFlatC={setHeadAFlatC} />
+          <Field label="Head A nominal thickness" unit="mm" step="0.5" value={headANomMm} onChange={setHeadANomMm} />
+
+          <SubHeader>Head B (right)</SubHeader>
+          <HeadInputs label="Head B" type={headBType} setType={setHeadBType} ratio={headBRatio} setRatio={setHeadBRatio}
+            torisL={headBTorisL} setTorisL={setHeadBTorisL} torisR={headBTorisR} setTorisR={setHeadBTorisR}
+            flatC={headBFlatC} setFlatC={setHeadBFlatC} />
+          <Field label="Head B nominal thickness" unit="mm" step="0.5" value={headBNomMm} onChange={setHeadBNomMm} />
+
+          <SubHeader>Design conditions (ASME BPVC Sec. VIII Div. 1)</SubHeader>
+          <div className="grid grid-cols-2 gap-x-3">
+            <Field label="Design pressure" unit="barg" step="0.1" value={designPBar} onChange={setDesignPBar} />
+            <Field label="Design temperature" unit="°C" value={designTempC} onChange={setDesignTempC} />
+          </div>
+          <Select label="Shell/head material" value={materialLabel} onChange={setMaterialLabel} options={MATERIAL_PRESETS.map(m => ({ label: m.label }))} />
+          {materialLabel === "Custom…" && (
+            <Field label="Allowable stress S" unit="MPa" value={customS} onChange={setCustomS} />
+          )}
+          <Select label="Joint efficiency" value={jointLabel} onChange={setJointLabel} options={JOINT_EFFICIENCIES.map(j => ({ label: j.label }))} />
+          <div className="grid grid-cols-2 gap-x-3">
+            <Field label="Corrosion allowance" unit="mm" step="0.5" value={caMm} onChange={setCaMm} />
+            <Field label="Shell nominal thickness" unit="mm" step="0.5" value={shellNomMm} onChange={setShellNomMm} />
+          </div>
+          <div className="text-[10px] text-neutral-500 mt-1 leading-relaxed">
+            S values shown are representative low/moderate-temperature figures for common materials — always
+            confirm the actual allowable stress from ASME II-D for your specific design temperature before finalizing.
+          </div>
+        </Plate>
+
+        <Plate title="Nozzle schedule">
+          {nozzles.map((n, i) => (
+            <div key={i} className="border border-neutral-800 rounded p-2 mb-2 relative">
+              <button onClick={() => removeNozzle(i)} className="absolute top-1 right-1 text-neutral-500 hover:text-red-400 text-xs px-1">✕</button>
+              <div className="grid grid-cols-2 gap-x-2">
+                <TextField label="Tag" value={n.tag} onChange={(v) => updateNozzle(i, "tag", v)} />
+                <TextField label="Size" value={n.size} onChange={(v) => updateNozzle(i, "size", v)} />
+              </div>
+              <TextField label="Service" value={n.service} onChange={(v) => updateNozzle(i, "service", v)} />
+              <div className="grid grid-cols-2 gap-x-2">
+                <TextField label="Rating/Sch." value={n.rating} onChange={(v) => updateNozzle(i, "rating", v)} />
+                <TextField label="Location" value={n.location} onChange={(v) => updateNozzle(i, "location", v)} />
+              </div>
+            </div>
+          ))}
+          <button onClick={addNozzle} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">
+            + Add nozzle
+          </button>
+          <div className="text-[10px] text-neutral-500 mt-2 leading-relaxed">
+            Sizes/locations only — this doesn't perform UG-37 area-replacement reinforcement calculations.
+            Check nozzle reinforcement separately for any nozzle taking significant load or above ~2" on a thin shell.
+          </div>
+        </Plate>
+
+        <Plate title="Paint / coating">
+          <TextField label="Surface preparation" value={surfacePrep} onChange={setSurfacePrep} />
+          <TextField label="Primer" value={primer} onChange={setPrimer} />
+          <TextField label="Topcoat" value={topcoat} onChange={setTopcoat} />
+          <TextField label="Colour" value={paintColor} onChange={setPaintColor} />
+        </Plate>
+
+        <Plate title="Additional components (manual)">
+          {components.map((c, i) => (
+            <div key={i} className="border border-neutral-800 rounded p-2 mb-2 relative">
+              <button onClick={() => removeComponent(i)} className="absolute top-1 right-1 text-neutral-500 hover:text-red-400 text-xs px-1">✕</button>
+              <TextField label="Description" value={c.description} onChange={(v) => updateComponent(i, "description", v)} />
+              <div className="grid grid-cols-2 gap-x-2">
+                <TextField label="Qty" value={c.qty} onChange={(v) => updateComponent(i, "qty", v)} />
+                <TextField label="Notes" value={c.notes} onChange={(v) => updateComponent(i, "notes", v)} />
+              </div>
+            </div>
+          ))}
+          <button onClick={addComponent} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">
+            + Add component (e.g. level gauge, PRV, agitator)
+          </button>
+        </Plate>
+
+        <Plate title="Volume">
+          <Readout label="Shell volume" value={fmt(calc.V_shell,3)} unit="m³" />
+          <Readout label="Head A volume" value={fmt(calc.headA.volume_m3,3)} unit="m³" />
+          <Readout label="Head B volume" value={fmt(calc.headB.volume_m3,3)} unit="m³" />
+          <Readout label="Total volume" value={fmt(calc.V_total,3)} unit="m³" big />
+          <Readout label="Total volume" value={fmt(calc.liters,0)} unit="litres" />
+          <Readout label="Total volume" value={fmt(calc.usGal,0)} unit="US gal" />
+          <Readout label="Overall length (approx.)" value={fmt(calc.OAL_mm,0)} unit="mm" />
+        </Plate>
+
+        <Plate title="Required thickness (ASME Sec. VIII Div.1)">
+          <Readout label="Shell (circumferential)" value={fmt(calc.t_shell_req,2)} unit="mm" />
+          {!shellOk && <div className="mb-2 text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1">Shell nominal ({fmt(shellNomMm,1)} mm) is below required — increase thickness.</div>}
+          <Readout label="Head A" value={fmt(calc.t_headA_req,2)} unit="mm" />
+          {!headAOk && <div className="mb-2 text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1">Head A nominal is below required — increase thickness.</div>}
+          <Readout label="Head B" value={fmt(calc.t_headB_req,2)} unit="mm" />
+          {!headBOk && <div className="mb-2 text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1">Head B nominal is below required — increase thickness.</div>}
+        </Plate>
+
+        <Plate title="MAWP check (at nominal thickness)">
+          <Readout label="Shell MAWP" value={fmt(calc.mawp_shell,2)} unit="barg" />
+          <Readout label="Head A MAWP" value={fmt(calc.mawp_headA,2)} unit="barg" />
+          <Readout label="Head B MAWP" value={fmt(calc.mawp_headB,2)} unit="barg" />
+          <Readout label="Governing MAWP" value={fmt(calc.mawp_governing,2)} unit="barg" big />
+          <Readout label="Hydrotest pressure (≈1.3×MAWP)" value={fmt(calc.hydrotest_bar,2)} unit="barg" />
+          <div className="text-[10px] text-neutral-500 mt-2 leading-relaxed">
+            Hydrotest figure is a simplified 1.3×MAWP per UG-99(b); the exact value should also apply the
+            stress ratio between test and design temperature if they differ materially.
+          </div>
+        </Plate>
+      </div>
+
+      {/* ===================== PRINT-ONLY DATASHEET ===================== */}
+      <div className="print-sheet text-black bg-white p-6" style={{ fontFamily: "Arial, sans-serif" }}>
+        <div className="flex justify-between items-start border-b-2 border-black pb-2 mb-3">
+          <div>
+            <div className="text-lg font-bold">TANK / VESSEL DATA SHEET</div>
+            <div className="text-xs">Design Code: ASME BPVC Section VIII, Division 1</div>
+          </div>
+          <div className="text-right text-xs">
+            <div>Doc No: {docNo || "—"}</div>
+            <div>Rev: {rev}</div>
+            <div>Date: ____________________</div>
+          </div>
+        </div>
+
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <tbody>
+            <tr><td className="border border-black px-2 py-1 font-bold w-1/4">Tag No.</td><td className="border border-black px-2 py-1 w-1/4">{tag}</td><td className="border border-black px-2 py-1 font-bold w-1/4">Service</td><td className="border border-black px-2 py-1 w-1/4">{service}</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold" colSpan="4">Description: {description}</td></tr>
+          </tbody>
+        </table>
+
+        <div className="font-bold text-sm mb-1 mt-3">DESIGN DATA</div>
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <tbody>
+            <tr><td className="border border-black px-2 py-1 font-bold">Design Pressure</td><td className="border border-black px-2 py-1">{fmt(designPBar,2)} barg</td>
+                <td className="border border-black px-2 py-1 font-bold">Design Temperature</td><td className="border border-black px-2 py-1">{fmt(designTempC,0)} °C</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Material</td><td className="border border-black px-2 py-1">{materialLabel} (S={fmt(S,0)} MPa)</td>
+                <td className="border border-black px-2 py-1 font-bold">Joint Efficiency</td><td className="border border-black px-2 py-1">{jointLabel}</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Corrosion Allowance</td><td className="border border-black px-2 py-1">{fmt(caMm,1)} mm</td>
+                <td className="border border-black px-2 py-1 font-bold">Governing MAWP</td><td className="border border-black px-2 py-1">{fmt(calc.mawp_governing,2)} barg</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Hydrotest Pressure</td><td className="border border-black px-2 py-1">{fmt(calc.hydrotest_bar,2)} barg</td>
+                <td className="border border-black px-2 py-1 font-bold">Total Volume</td><td className="border border-black px-2 py-1">{fmt(calc.V_total,2)} m³ ({fmt(calc.liters,0)} L)</td></tr>
+          </tbody>
+        </table>
+
+        <div className="font-bold text-sm mb-1 mt-3">DIMENSIONAL DATA</div>
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <tbody>
+            <tr><td className="border border-black px-2 py-1 font-bold">Inside Diameter</td><td className="border border-black px-2 py-1">{fmt(idMm,0)} mm</td>
+                <td className="border border-black px-2 py-1 font-bold">Tan–Tan Length</td><td className="border border-black px-2 py-1">{fmt(tanTanMm,0)} mm</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Overall Length (approx.)</td><td className="border border-black px-2 py-1">{fmt(calc.OAL_mm,0)} mm</td>
+                <td className="border border-black px-2 py-1 font-bold">Shell Thickness (nom. / req.)</td><td className="border border-black px-2 py-1">{fmt(shellNomMm,1)} / {fmt(calc.t_shell_req,2)} mm</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Head A Type / Thk (nom. / req.)</td><td className="border border-black px-2 py-1">{headAType} — {fmt(headANomMm,1)} / {fmt(calc.t_headA_req,2)} mm</td>
+                <td className="border border-black px-2 py-1 font-bold">Head B Type / Thk (nom. / req.)</td><td className="border border-black px-2 py-1">{headBType} — {fmt(headBNomMm,1)} / {fmt(calc.t_headB_req,2)} mm</td></tr>
+          </tbody>
+        </table>
+
+        <div className="font-bold text-sm mb-1 mt-3">NOZZLE SCHEDULE</div>
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th className="border border-black px-2 py-1">Tag</th>
+              <th className="border border-black px-2 py-1">Service</th>
+              <th className="border border-black px-2 py-1">Size</th>
+              <th className="border border-black px-2 py-1">Rating/Sch.</th>
+              <th className="border border-black px-2 py-1">Location</th>
+            </tr>
+          </thead>
+          <tbody>
+            {nozzles.map((n, i) => (
+              <tr key={i}>
+                <td className="border border-black px-2 py-1">{n.tag}</td>
+                <td className="border border-black px-2 py-1">{n.service}</td>
+                <td className="border border-black px-2 py-1">{n.size}</td>
+                <td className="border border-black px-2 py-1">{n.rating}</td>
+                <td className="border border-black px-2 py-1">{n.location}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="font-bold text-sm mb-1 mt-3">PAINT / COATING SPECIFICATION</div>
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <tbody>
+            <tr><td className="border border-black px-2 py-1 font-bold w-1/4">Surface Prep.</td><td className="border border-black px-2 py-1 w-3/4">{surfacePrep}</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Primer</td><td className="border border-black px-2 py-1">{primer}</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Topcoat</td><td className="border border-black px-2 py-1">{topcoat}</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Colour</td><td className="border border-black px-2 py-1">{paintColor}</td></tr>
+          </tbody>
+        </table>
+
+        <div className="font-bold text-sm mb-1 mt-3">ADDITIONAL COMPONENTS</div>
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th className="border border-black px-2 py-1">Description</th>
+              <th className="border border-black px-2 py-1">Qty</th>
+              <th className="border border-black px-2 py-1">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {components.map((c, i) => (
+              <tr key={i}>
+                <td className="border border-black px-2 py-1">{c.description}</td>
+                <td className="border border-black px-2 py-1">{c.qty}</td>
+                <td className="border border-black px-2 py-1">{c.notes}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="grid grid-cols-3 gap-4 mt-6 text-xs">
+          <div>Prepared by: ______________________</div>
+          <div>Checked by: ______________________</div>
+          <div>Approved by: ______________________</div>
+        </div>
+        <div className="text-[9px] text-neutral-600 mt-4 leading-relaxed">
+          Preliminary sizing calculation per ASME BPVC Section VIII, Division 1 (simplified thin-wall formulas,
+          UG-27 and UG-32). Allowable stress values are representative — confirm from ASME Section II-D for the
+          exact design temperature. Nozzle schedule is descriptive only; verify area-replacement reinforcement
+          (UG-37) separately. Not a substitute for a certified vessel design/fabrication drawing.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ================= BOILER ENGINEERING HELPERS =================
+
+// Verified saturated steam table (P bar abs, T degC, hf kJ/kg, hg kJ/kg, vg m3/kg)
+// Cross-checked against CVUT thermodynamics tables + EngineeringToolbox (8 bar/170.4°C agreement).
+const STEAM_TABLE = [
+  [1, 99.6, 417.4, 2675, 1.694],
+  [1.5, 111.4, 467.1, 2694, 1.159],
+  [2, 120.2, 504.7, 2707, 0.886],
+  [3, 133.6, 561.5, 2725, 0.606],
+  [4, 143.6, 604.8, 2739, 0.463],
+  [5, 151.9, 640.2, 2749, 0.375],
+  [6, 158.9, 670.6, 2757, 0.316],
+  [7, 165.0, 697.2, 2764, 0.273],
+  [8, 170.4, 721.1, 2769, 0.240],
+  [9, 175.4, 742.8, 2774, 0.215],
+  [10, 179.9, 762.8, 2778, 0.194],
+  [12.54, 190, 807.6, 2786, 0.157],
+  [15.54, 200, 852.4, 2793, 0.127],
+  [19.06, 210, 897.8, 2798, 0.104],
+  [23.18, 220, 943.6, 2802, 0.086],
+  [27.95, 230, 990.1, 2804, 0.072],
+  [33.44, 240, 1037.3, 2804, 0.06],
+  [40, 250.4, 1087, 2801, 0.05],
+  [50, 264.0, 1154, 2794, 0.039],
+  [60, 275.6, 1213, 2784, 0.032],
+  [70, 285.9, 1267, 2772, 0.027],
+  [80, 295.1, 1317, 2758, 0.024],
+  [90, 303.4, 1363, 2742, 0.021],
+  [100, 311.1, 1408, 2725, 0.018],
+];
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function steamLookupByPressure(pBar) {
+  const t = STEAM_TABLE;
+  const clamp = pBar <= t[0][0] ? 0 : pBar >= t[t.length - 1][0] ? t.length - 2 : null;
+  if (pBar <= t[0][0]) return { T: t[0][1], hf: t[0][2], hg: t[0][3], vg: t[0][4] };
+  if (pBar >= t[t.length - 1][0]) { const l = t[t.length - 1]; return { T: l[1], hf: l[2], hg: l[3], vg: l[4] }; }
+  for (let i = 0; i < t.length - 1; i++) {
+    if (pBar >= t[i][0] && pBar <= t[i + 1][0]) {
+      const f = (pBar - t[i][0]) / (t[i + 1][0] - t[i][0]);
+      return { T: lerp(t[i][1], t[i + 1][1], f), hf: lerp(t[i][2], t[i + 1][2], f), hg: lerp(t[i][3], t[i + 1][3], f), vg: lerp(t[i][4], t[i + 1][4], f) };
+    }
+  }
+}
+
+function steamLookupByTemperature(tC) {
+  const t = STEAM_TABLE;
+  if (tC <= t[0][1]) return { P: t[0][0], hf: t[0][2], hg: t[0][3], vg: t[0][4] };
+  if (tC >= t[t.length - 1][1]) { const l = t[t.length - 1]; return { P: l[0], hf: l[2], hg: l[3], vg: l[4] }; }
+  for (let i = 0; i < t.length - 1; i++) {
+    if (tC >= t[i][1] && tC <= t[i + 1][1]) {
+      const f = (tC - t[i][1]) / (t[i + 1][1] - t[i][1]);
+      return { P: lerp(t[i][0], t[i + 1][0], f), hf: lerp(t[i][2], t[i + 1][2], f), hg: lerp(t[i][3], t[i + 1][3], f), vg: lerp(t[i][4], t[i + 1][4], f) };
+    }
+  }
+}
+
+// Combustion & flue gas — rigorous molar balance from as-fired ultimate analysis (mass % incl. moisture/ash).
+// Verified: pure-carbon case reproduces the classic CO2max=20.9% theoretical result; cross-checked
+// against the widely-used EA=O2/(20.9-O2)*100 simplified relationship for the no-fuel-N2 case.
+function combustionCalc(Cpct, Hpct, Opct, Npct, Spct, Mpct, EA) {
+  const C = Cpct / 100, H = Hpct / 100, O = Opct / 100, N = Npct / 100, S = Spct / 100, M = Mpct / 100;
+  const Ath = 11.5 * C + 34.5 * (H - O / 8) + 4.3 * S; // kg theoretical air / kg fuel
+  const nCO2 = C / 12.011, nSO2 = S / 32.06, nH2Ocomb = H / 2.016, nH2Omoist = M / 18.015, nN2fuel = N / 28.014;
+  const O2th = C / 12.011 + H / 4.032 + S / 32.06 - O / 32.0; // kmol O2 / kg fuel
+  const DryAirTh = O2th / 0.209; // kmol dry air / kg fuel
+  const O2excess = O2th * EA;
+  const DryAirActual = DryAirTh * (1 + EA);
+  const N2total = DryAirActual * 0.791 + nN2fuel;
+  const DryTotal = nCO2 + nSO2 + O2excess + N2total;
+  const WetTotal = DryTotal + nH2Ocomb + nH2Omoist;
+  const flueGasMass = nCO2 * 44.01 + nSO2 * 64.06 + O2excess * 32 + N2total * 28.014 + (nH2Ocomb + nH2Omoist) * 18.015;
+  return {
+    Ath, Aactual: Ath * (1 + EA),
+    CO2pct: (nCO2 / DryTotal) * 100,
+    O2pct: (O2excess / DryTotal) * 100,
+    N2pct: (N2total / DryTotal) * 100,
+    SO2ppm: (nSO2 / DryTotal) * 1e6,
+    H2Opct_wet: ((nH2Ocomb + nH2Omoist) / WetTotal) * 100,
+    flueGasMass,
+  };
+}
+
+function solveEAfromO2(Cpct, Hpct, Opct, Npct, Spct, Mpct, targetO2pct) {
+  let lo = 0, hi = 3.0;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    const o2 = combustionCalc(Cpct, Hpct, Opct, Npct, Spct, Mpct, mid).O2pct;
+    if (o2 < targetO2pct) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+// ================= BOILER PANEL =================
+function BoilerPanel() {
+  // --- Combustion & flue gas ---
+  const [Cpct, setCpct] = useState(28);
+  const [Hpct, setHpct] = useState(3.4);
+  const [Opct, setOpct] = useState(22.6);
+  const [Npct, setNpct] = useState(0.3);
+  const [Spct, setSpct] = useState(0.03);
+  const [Mpct, setMpct] = useState(35);
+  const [combMode, setCombMode] = useState("givenEA"); // 'givenEA' | 'givenO2'
+  const [eaPct, setEaPct] = useState(30);
+  const [measuredO2, setMeasuredO2] = useState(5);
+  const [firingRate, setFiringRate] = useState(1000);
+
+  const ashPct = 100 - (Cpct + Hpct + Opct + Npct + Spct + Mpct);
+  const sumOk = ashPct >= -0.5 && ashPct <= 100;
+
+  const comb = useMemo(() => {
+    const EA = combMode === "givenEA" ? eaPct / 100 : solveEAfromO2(Cpct, Hpct, Opct, Npct, Spct, Mpct, measuredO2);
+    const r = combustionCalc(Cpct, Hpct, Opct, Npct, Spct, Mpct, EA);
+    const flueGasFlow_kgHr = r.flueGasMass * firingRate;
+    return { ...r, EA, flueGasFlow_kgHr };
+  }, [Cpct, Hpct, Opct, Npct, Spct, Mpct, combMode, eaPct, measuredO2, firingRate]);
+
+  // --- Steam table ---
+  const [steamMode, setSteamMode] = useState("byPressure");
+  const [pressureInput, setPressureInput] = useState(9);
+  const [pressureIsGauge, setPressureIsGauge] = useState(true);
+  const [tempInput, setTempInput] = useState(175);
+  const [feedwaterTempC, setFeedwaterTempC] = useState(80);
+
+  const steam = useMemo(() => {
+    if (steamMode === "byPressure") {
+      const pBarA = pressureIsGauge ? pressureInput + 1.01325 : pressureInput;
+      const r = steamLookupByPressure(pBarA);
+      return { ...r, pBarA, hfg: r.hg - r.hf };
+    } else {
+      const r = steamLookupByTemperature(tempInput);
+      return { ...r, T: tempInput, hfg: r.hg - r.hf };
+    }
+  }, [steamMode, pressureInput, pressureIsGauge, tempInput]);
+
+  const feedwaterH = feedwaterTempC * 4.186; // approx subcooled liquid enthalpy, kJ/kg
+  const evapDuty = steam.hg - feedwaterH; // kJ/kg feedwater -> steam at this pressure
+
+  // --- Draft & fan sizing ---
+  const [stackHeight, setStackHeight] = useState(20);
+  const [ambientTempC, setAmbientTempC] = useState(33); // typical hot-season day, Thailand
+  const [flueGasTempC, setFlueGasTempC] = useState(180);
+  const [flueGasFlowInput, setFlueGasFlowInput] = useState(5000);
+  const [systemResistancePa, setSystemResistancePa] = useState(1500);
+  const [fanEff, setFanEff] = useState(0.7);
+  const [fanServiceFactor, setFanServiceFactor] = useState(1.2);
+
+  const draft = useMemo(() => {
+    const Tamb = ambientTempC + 273.15, Tgas = flueGasTempC + 273.15;
+    const Pa = stackHeight * 3464.6 * (1 / Tamb - 1 / Tgas);
+    const rhoGas = 101325 / (287 * Tgas); // kg/m3, air-like approximation
+    const Q_m3s = flueGasFlowInput / 3600 / rhoGas;
+    const netResistance_Pa = Math.max(0, systemResistancePa - Pa);
+    const P_kW_running = (Q_m3s * netResistance_Pa) / 1000 / fanEff;
+    const P_kW = P_kW_running * fanServiceFactor;
+    return { Pa, mmH2O: Pa / 9.81, rhoGas, Q_m3s, Q_m3hr: Q_m3s * 3600, netResistance_Pa, P_kW_running, P_kW, P_HP: P_kW / 0.7457 };
+  }, [stackHeight, ambientTempC, flueGasTempC, flueGasFlowInput, systemResistancePa, fanEff, fanServiceFactor]);
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "O2", value: fmt(comb.O2pct,2), unit: "%" },
+        { label: "CO2", value: fmt(comb.CO2pct,2), unit: "%" },
+        { label: "Steam Tsat", value: fmt(steam.T,1), unit: "°C" },
+        { label: "Fan motor", value: fmt(nearestStandardMotor(draft.P_kW),2), unit: "kW" },
+      ]} />
+
+      <Plate title="Inputs — combustion & draft">
+        <SubHeader>Fuel ultimate analysis (as-fired, wt%)</SubHeader>
+        <div className="grid grid-cols-3 gap-x-2">
+          <Field label="C" unit="%" step="0.1" value={Cpct} onChange={setCpct} />
+          <Field label="H" unit="%" step="0.1" value={Hpct} onChange={setHpct} />
+          <Field label="O" unit="%" step="0.1" value={Opct} onChange={setOpct} />
+        </div>
+        <div className="grid grid-cols-3 gap-x-2">
+          <Field label="N" unit="%" step="0.01" value={Npct} onChange={setNpct} />
+          <Field label="S" unit="%" step="0.01" value={Spct} onChange={setSpct} />
+          <Field label="Moisture" unit="%" step="0.1" value={Mpct} onChange={setMpct} />
+        </div>
+        <Readout label="Ash (remainder)" value={fmt(ashPct,2)} unit="%" />
+        {!sumOk && (
+          <div className="mt-1 text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1.5">
+            C+H+O+N+S+Moisture exceeds 100% — check your ultimate analysis figures.
+          </div>
+        )}
+
+        <SubHeader>Excess air / O2</SubHeader>
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setCombMode("givenEA")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${combMode === "givenEA" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Given excess air %</button>
+          <button onClick={() => setCombMode("givenO2")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${combMode === "givenO2" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Given measured O2%</button>
+        </div>
+        {combMode === "givenEA" ? (
+          <Field label="Excess air" unit="%" step="1" value={eaPct} onChange={setEaPct} />
+        ) : (
+          <Field label="Measured O2 (dry, flue gas analyzer)" unit="%" step="0.1" value={measuredO2} onChange={setMeasuredO2} />
+        )}
+        <Field label="Firing rate" unit="kg fuel/hr" step="10" value={firingRate} onChange={setFiringRate} hint="Used to scale flue gas mass flow for the fan sizing section." />
+
+        <SubHeader>Draft & ID/FD fan</SubHeader>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Stack height" unit="m" step="0.5" value={stackHeight} onChange={setStackHeight} />
+          <Field label="Ambient temp." unit="°C" value={ambientTempC} onChange={setAmbientTempC} hint="Default 33°C represents a typical hot-season day in Thailand — adjust for your actual site design condition." />
+        </div>
+        <Field label="Flue gas temperature" unit="°C" value={flueGasTempC} onChange={setFlueGasTempC} />
+        <Field label="Flue gas mass flow" unit="kg/hr" step="50" value={flueGasFlowInput} onChange={setFlueGasFlowInput} hint={`From combustion calc at this firing rate: ${fmt(comb.flueGasFlow_kgHr,0)} kg/hr — copy across manually.`} />
+        <Field label="Required system resistance" unit="Pa" step="50" value={systemResistancePa} onChange={setSystemResistancePa} hint="Sum of boiler passes + ductwork + dust collector pressure drop (from equipment data)." />
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Fan efficiency" unit="0–1" step="0.01" value={fanEff} onChange={setFanEff} />
+          <Field label="Service factor" unit="×" step="0.05" value={fanServiceFactor} onChange={setFanServiceFactor} />
+        </div>
+      </Plate>
+
+      <Plate title="Combustion result">
+        <Readout label="Theoretical air" value={fmt(comb.Ath,3)} unit="kg air/kg fuel" />
+        <Readout label="Actual air (at set excess)" value={fmt(comb.Aactual,3)} unit="kg air/kg fuel" />
+        <Readout label="Excess air" value={fmt(comb.EA*100,1)} unit="%" big />
+        <Readout label="O2 (dry)" value={fmt(comb.O2pct,2)} unit="%" />
+        <Readout label="CO2 (dry)" value={fmt(comb.CO2pct,2)} unit="%" />
+        <Readout label="N2 (dry)" value={fmt(comb.N2pct,2)} unit="%" />
+        <Readout label="SO2 (dry)" value={fmt(comb.SO2ppm,0)} unit="ppm" />
+        <Readout label="H2O (wet basis)" value={fmt(comb.H2Opct_wet,2)} unit="%" />
+        <Readout label="Flue gas mass" value={fmt(comb.flueGasMass,3)} unit="kg/kg fuel" />
+        <Readout label="Flue gas flow (at firing rate)" value={fmt(comb.flueGasFlow_kgHr,0)} unit="kg/hr" big />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          Rigorous molar combustion balance from ultimate analysis — not the simplified EA≈O2/(20.9-O2)
+          rule of thumb, though the two agree closely when fuel-bound N2 is small (typical for biomass).
+        </div>
+      </Plate>
+
+      <Plate title="Saturated steam table">
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setSteamMode("byPressure")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${steamMode === "byPressure" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>By pressure</button>
+          <button onClick={() => setSteamMode("byTemp")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${steamMode === "byTemp" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>By temperature</button>
+        </div>
+        {steamMode === "byPressure" ? (
+          <>
+            <Field label="Pressure" unit={pressureIsGauge ? "barg" : "bara"} step="0.1" value={pressureInput} onChange={setPressureInput} />
+            <button onClick={() => setPressureIsGauge(!pressureIsGauge)} className="text-[10px] text-sky-400 underline mb-2">
+              Switch to {pressureIsGauge ? "absolute" : "gauge"}
+            </button>
+            <Readout label="Saturation temperature" value={fmt(steam.T,1)} unit="°C" big />
+          </>
+        ) : (
+          <>
+            <Field label="Temperature" unit="°C" step="1" value={tempInput} onChange={setTempInput} />
+            <Readout label="Saturation pressure" value={fmt(steam.pBarA ?? steam.P,2)} unit="bar abs" big />
+          </>
+        )}
+        <Readout label="hf (sat. liquid)" value={fmt(steam.hf,1)} unit="kJ/kg" />
+        <Readout label="hg (sat. vapour)" value={fmt(steam.hg,1)} unit="kJ/kg" />
+        <Readout label="hfg (latent heat)" value={fmt(steam.hfg,1)} unit="kJ/kg" />
+        <Readout label="vg (specific volume)" value={fmt(steam.vg,4)} unit="m³/kg" />
+        <Field label="Feedwater temperature" unit="°C" step="1" value={feedwaterTempC} onChange={setFeedwaterTempC} hint="For evaporation duty below (approx. cp×T for subcooled liquid)." />
+        <Readout label="Evaporation duty (feedwater → steam)" value={fmt(evapDuty,1)} unit="kJ/kg" big />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          Table interpolated from verified reference data points; exact at tabulated pressures, small
+          interpolation error between (well under 1% in the 1–30 bar range most boiler work falls in).
+        </div>
+      </Plate>
+
+      <Plate title="Draft & fan result">
+        <Readout label="Theoretical natural draft" value={fmt(draft.Pa,1)} unit="Pa" />
+        <Readout label="Theoretical natural draft" value={fmt(draft.mmH2O,2)} unit="mmH₂O" big />
+        <Readout label="Flue gas density at stack temp" value={fmt(draft.rhoGas,3)} unit="kg/m³" />
+        <Readout label="Flue gas volumetric flow" value={fmt(draft.Q_m3hr,0)} unit="Am³/hr" />
+        <Readout label="Net resistance after natural draft" value={fmt(draft.netResistance_Pa,0)} unit="Pa" />
+        <Readout label="Calculated running power" value={fmt(draft.P_kW_running,2)} unit="kW" />
+        <Readout label="With service factor" value={fmt(draft.P_kW,2)} unit="kW" />
+        <Readout label="Nearest standard motor" value={fmt(nearestStandardMotor(draft.P_kW),2)} unit="kW" big />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          Natural draft is a first-principles density-difference calc (standard "H×3465×(1/Ta−1/Tg)" form).
+          Fan power assumes the natural draft partially offsets the required system resistance — verify
+          against actual measured/quoted system pressure drop for a real fan selection.
+        </div>
+      </Plate>
+    </div>
+  );
+}
+
+// ================= REFRACTORY HELPERS =================
+const BRICK_PRESETS = [
+  { label: "Standard straight (230×114×64mm)", L: 230, H: 114, D: 64 },
+  { label: "Standard straight (230×114×76mm)", L: 230, H: 114, D: 76 },
+  { label: "Standard straight, deep (230×114×114mm)", L: 230, H: 114, D: 114 },
+  { label: "Custom…", L: null, H: null, D: null },
+];
+
+const CASTABLE_PRESETS = [
+  { label: "Dense castable (~2300–2500 kg/m³)", density: 2400, water: 9 },
+  { label: "Medium-density castable (~1800–2000 kg/m³)", density: 1900, water: 11 },
+  { label: "Insulating castable (~1000–1400 kg/m³)", density: 1200, water: 16 },
+  { label: "Lightweight insulating (~600–900 kg/m³)", density: 750, water: 20 },
+  { label: "Custom…", density: null, water: null },
+];
+
+// ================= REFRACTORY PANEL =================
+function RefractoryPanel() {
+  const [wallType, setWallType] = useState("brick"); // 'brick' | 'castable'
+  const [area, setArea] = useState(10);
+  const [thickness, setThickness] = useState(230);
+
+  // brick
+  const [brickPreset, setBrickPreset] = useState("Standard straight (230×114×64mm)");
+  const [customL, setCustomL] = useState(230);
+  const [customH, setCustomH] = useState(114);
+  const [customD, setCustomD] = useState(64);
+  const [jointMm, setJointMm] = useState(3);
+  const [brickWaste, setBrickWaste] = useState(5);
+  const [brickDensity, setBrickDensity] = useState(2100);
+  const [mortarDensity, setMortarDensity] = useState(1900);
+  const [mortarBagKg, setMortarBagKg] = useState(25);
+
+  // castable
+  const [castablePreset, setCastablePreset] = useState("Dense castable (~2300–2500 kg/m³)");
+  const [customCastableDensity, setCustomCastableDensity] = useState(2400);
+  const [castableWaste, setCastableWaste] = useState(10);
+  const [castableBagKg, setCastableBagKg] = useState(25);
+  const [waterPct, setWaterPct] = useState(9);
+
+  const brickDims = useMemo(() => {
+    if (brickPreset === "Custom…") return { L: customL, H: customH, D: customD };
+    const p = BRICK_PRESETS.find(b => b.label === brickPreset);
+    return { L: p.L, H: p.H, D: p.D };
+  }, [brickPreset, customL, customH, customD]);
+
+  // keep water% default in sync with castable preset choice, unless user picked Custom
+  const castableDensity = castablePreset === "Custom…" ? customCastableDensity : CASTABLE_PRESETS.find(c => c.label === castablePreset)?.density ?? customCastableDensity;
+
+  const brick = useMemo(() => {
+    const { L, H, D } = brickDims;
+    if (!L || !H || !D) return null;
+    const layers = Math.ceil(thickness / D);
+    const actualThickness = layers * D;
+    const effL = (L + jointMm) / 1000, effH = (H + jointMm) / 1000;
+    const bricksPerM2PerLayer = 1 / (effL * effH);
+    const totalBricksRaw = bricksPerM2PerLayer * area * layers;
+    const totalBricksOrdered = Math.ceil(totalBricksRaw * (1 + brickWaste / 100));
+    const brickVolEach = (L / 1000) * (H / 1000) * (D / 1000);
+    const totalBrickVolume = totalBricksRaw * brickVolEach;
+    const wallVolume = area * (actualThickness / 1000);
+    const mortarVolume = Math.max(0, wallVolume - totalBrickVolume);
+    const mortarWeight = mortarVolume * mortarDensity;
+    const mortarBags = Math.ceil(mortarWeight / mortarBagKg);
+    const brickWeightInstalled = totalBricksRaw * brickVolEach * brickDensity;
+    const brickWeightOrdered = totalBricksOrdered * brickVolEach * brickDensity;
+    const thicknessMismatch = Math.abs(actualThickness - thickness) > 0.5;
+    return {
+      layers, actualThickness, bricksPerM2PerLayer, totalBricksRaw, totalBricksOrdered,
+      wallVolume, totalBrickVolume, mortarVolume, mortarWeight, mortarBags,
+      brickWeightInstalled, brickWeightOrdered, thicknessMismatch,
+    };
+  }, [brickDims, thickness, area, jointMm, brickWaste, mortarDensity, mortarBagKg, brickDensity]);
+
+  const castable = useMemo(() => {
+    const volume = area * (thickness / 1000);
+    const weightRaw = volume * castableDensity;
+    const weightOrdered = weightRaw * (1 + castableWaste / 100);
+    const bags = Math.ceil(weightOrdered / castableBagKg);
+    const waterWeight = weightOrdered * (waterPct / 100);
+    return { volume, weightRaw, weightOrdered, bags, waterWeight };
+  }, [area, thickness, castableDensity, castableWaste, castableBagKg, waterPct]);
+
+  return (
+    <div>
+      <StickyResults items={
+        wallType === "brick"
+          ? [
+              { label: "Bricks", value: brick ? fmt(brick.totalBricksOrdered, 0) : "—", unit: "pcs" },
+              { label: "Mortar", value: brick ? fmt(brick.mortarBags, 0) : "—", unit: "bags" },
+              { label: "Thickness", value: brick ? fmt(brick.actualThickness, 0) : "—", unit: "mm", warn: brick?.thicknessMismatch },
+            ]
+          : [
+              { label: "Castable", value: fmt(castable.weightOrdered, 0), unit: "kg" },
+              { label: "Bags", value: fmt(castable.bags, 0), unit: "bags" },
+              { label: "Water", value: fmt(castable.waterWeight, 0), unit: "kg" },
+            ]
+      } />
+
+      <Plate title="Inputs">
+        <SubHeader>Wall</SubHeader>
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setWallType("brick")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${wallType === "brick" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Brick wall</button>
+          <button onClick={() => setWallType("castable")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${wallType === "castable" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Castable wall</button>
+        </div>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Wall area" unit="m²" step="0.1" value={area} onChange={setArea} />
+          <Field label="Wall thickness" unit="mm" step="1" value={thickness} onChange={setThickness} />
+        </div>
+
+        {wallType === "brick" ? (
+          <>
+            <SubHeader>Brick</SubHeader>
+            <Select label="Brick size" value={brickPreset} onChange={setBrickPreset} options={BRICK_PRESETS.map(b => ({ label: b.label }))} />
+            {brickPreset === "Custom…" && (
+              <div className="grid grid-cols-3 gap-x-2">
+                <Field label="Length" unit="mm" value={customL} onChange={setCustomL} />
+                <Field label="Height" unit="mm" value={customH} onChange={setCustomH} />
+                <Field label="Depth" unit="mm" value={customD} onChange={setCustomD} hint="Into the wall thickness direction." />
+              </div>
+            )}
+            <Field label="Mortar joint thickness" unit="mm" step="0.5" value={jointMm} onChange={setJointMm} hint="Refractory joints are usually thinner than regular masonry — 2–5mm typical." />
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Brick waste allowance" unit="%" step="1" value={brickWaste} onChange={setBrickWaste} hint="Breakage/cutting allowance — 5–10% typical." />
+              <Field label="Brick density" unit="kg/m³" step="50" value={brickDensity} onChange={setBrickDensity} hint="~1900–2300 for fireclay; confirm from product data." />
+            </div>
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Mortar (wet) density" unit="kg/m³" step="50" value={mortarDensity} onChange={setMortarDensity} />
+              <Field label="Mortar bag size" unit="kg" step="1" value={mortarBagKg} onChange={setMortarBagKg} />
+            </div>
+          </>
+        ) : (
+          <>
+            <SubHeader>Castable</SubHeader>
+            <Select label="Castable type" value={castablePreset} onChange={(v) => {
+              setCastablePreset(v);
+              const p = CASTABLE_PRESETS.find(c => c.label === v);
+              if (p && p.water) setWaterPct(p.water);
+            }} options={CASTABLE_PRESETS.map(c => ({ label: c.label }))} />
+            {castablePreset === "Custom…" && (
+              <Field label="Bulk density" unit="kg/m³" step="50" value={customCastableDensity} onChange={setCustomCastableDensity} />
+            )}
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Waste allowance" unit="%" step="1" value={castableWaste} onChange={setCastableWaste} hint="Trim/spillage loss — 8–15% typical, more for complex shapes." />
+              <Field label="Bag size" unit="kg" step="1" value={castableBagKg} onChange={setCastableBagKg} />
+            </div>
+            <Field label="Water addition" unit="% by weight" step="0.5" value={waterPct} onChange={setWaterPct} hint="Typical range 6–20% depending on grade — always use the figure from the product's technical data sheet, not this default." />
+          </>
+        )}
+      </Plate>
+
+      {wallType === "brick" && brick && (
+        <>
+          <Plate title="Brick & mortar quantities">
+            <Readout label="Layers (courses deep)" value={fmt(brick.layers,0)} unit="" />
+            <Readout label="Actual achieved thickness" value={fmt(brick.actualThickness,0)} unit="mm" />
+            {brick.thicknessMismatch && (
+              <div className="mb-2 text-[11px] text-amber-400 bg-amber-950/30 border border-amber-900 rounded px-2 py-1.5">
+                Requested thickness ({fmt(thickness,0)}mm) doesn't divide evenly by the brick depth — actual
+                built thickness will be {fmt(brick.actualThickness,0)}mm. Pick a brick depth that divides
+                evenly into your target thickness if this matters.
+              </div>
+            )}
+            <Readout label="Bricks per m² per layer" value={fmt(brick.bricksPerM2PerLayer,1)} unit="" />
+            <Readout label="Bricks required (as built)" value={fmt(brick.totalBricksRaw,0)} unit="pcs" />
+            <Readout label="Bricks to order (+ waste)" value={fmt(brick.totalBricksOrdered,0)} unit="pcs" big />
+            <Readout label="Mortar volume" value={fmt(brick.mortarVolume,3)} unit="m³" />
+            <Readout label="Mortar weight" value={fmt(brick.mortarWeight,0)} unit="kg" />
+            <Readout label="Mortar bags to order" value={fmt(brick.mortarBags,0)} unit="bags" big />
+          </Plate>
+
+          <Plate title="Weight (for structural / handling reference)">
+            <Readout label="Installed brick weight" value={fmt(brick.brickWeightInstalled/1000,2)} unit="tonnes" />
+            <Readout label="Ordered brick weight (+ waste)" value={fmt(brick.brickWeightOrdered/1000,2)} unit="tonnes" />
+          </Plate>
+        </>
+      )}
+
+      {wallType === "castable" && (
+        <Plate title="Castable quantities">
+          <Readout label="Volume" value={fmt(castable.volume,3)} unit="m³" />
+          <Readout label="Weight (as-designed)" value={fmt(castable.weightRaw,0)} unit="kg" />
+          <Readout label="Weight to order (+ waste)" value={fmt(castable.weightOrdered,0)} unit="kg" big />
+          <Readout label="Bags to order" value={fmt(castable.bags,0)} unit="bags" big />
+          <Readout label="Water required (approx.)" value={fmt(castable.waterWeight,0)} unit="kg (≈ litres)" />
+        </Plate>
+      )}
+
+      <div className="text-[10px] text-neutral-500 leading-relaxed px-1">
+        Density, water addition, and joint figures vary significantly by manufacturer and product grade
+        (refractory bulk densities alone span roughly 400–2900 kg/m³ across product types) — the defaults here
+        are indicative starting points, not universal constants. Always confirm against the actual product's
+        technical data sheet before ordering. This tool doesn't cover anchor/hexmesh spacing, expansion
+        joints, or curing/dry-out schedules — plan those separately.
+      </div>
+    </div>
+  );
+}
+
+// ================= STEEL PROPERTIES DATA =================
+// ASME B36.10M pipe dimensions — OD fixed per NPS, wall thickness (mm) by schedule.
+// Compiled and cross-checked against EngineeringToolbox (B36.10/19) + independent weight-per-foot
+// data points (4", 6", 8", 12" Sch40 all verified via the weight formula below to within rounding).
+// STD and Sch40 (also XS and Sch80) are listed as separate keys since they diverge above NPS10 —
+// a common source of real ordering mistakes if conflated.
+const PIPE_TABLE = [
+  { nps: "1/2", dn: 15, od: 21.34, sch: { 10: 2.11, 40: 2.77, STD: 2.77, 80: 3.73, XS: 3.73, 160: 4.75, XXS: 7.47 } },
+  { nps: "3/4", dn: 20, od: 26.67, sch: { 10: 2.11, 40: 2.87, STD: 2.87, 80: 3.91, XS: 3.91, 160: 5.56, XXS: 7.82 } },
+  { nps: "1", dn: 25, od: 33.40, sch: { 10: 2.77, 40: 3.38, STD: 3.38, 80: 4.55, XS: 4.55, 160: 6.35, XXS: 9.09 } },
+  { nps: "1-1/4", dn: 32, od: 42.16, sch: { 10: 2.77, 40: 3.56, STD: 3.56, 80: 4.85, XS: 4.85, 160: 6.35, XXS: 9.70 } },
+  { nps: "1-1/2", dn: 40, od: 48.26, sch: { 10: 2.77, 40: 3.68, STD: 3.68, 80: 5.08, XS: 5.08, 160: 7.14, XXS: 10.16 } },
+  { nps: "2", dn: 50, od: 60.33, sch: { 10: 2.77, 40: 3.91, STD: 3.91, 80: 5.54, XS: 5.54, 160: 8.74, XXS: 11.07 } },
+  { nps: "2-1/2", dn: 65, od: 73.03, sch: { 10: 3.05, 40: 5.16, STD: 5.16, 80: 7.01, XS: 7.01, 160: 9.53, XXS: 14.02 } },
+  { nps: "3", dn: 80, od: 88.90, sch: { 10: 3.05, 40: 5.49, STD: 5.49, 80: 7.62, XS: 7.62, 160: 11.13, XXS: 15.24 } },
+  { nps: "4", dn: 100, od: 114.30, sch: { 10: 3.05, 40: 6.02, STD: 6.02, 80: 8.56, XS: 8.56, 120: 11.13, 160: 13.49, XXS: 17.12 } },
+  { nps: "5", dn: 125, od: 141.30, sch: { 10: 3.40, 40: 6.55, STD: 6.55, 80: 9.53, XS: 9.53, 120: 12.70, 160: 15.88, XXS: 19.05 } },
+  { nps: "6", dn: 150, od: 168.28, sch: { 10: 3.40, 40: 7.11, STD: 7.11, 80: 10.97, XS: 10.97, 120: 14.27, 160: 18.24, XXS: 21.95 } },
+  { nps: "8", dn: 200, od: 219.08, sch: { 10: 3.76, 20: 6.35, 30: 7.04, 40: 8.18, STD: 8.18, 60: 10.31, 80: 12.70, XS: 12.70, 100: 15.09, 120: 18.26, 140: 20.62, XXS: 22.23, 160: 23.01 } },
+  { nps: "10", dn: 250, od: 273.05, sch: { 10: 4.19, 20: 6.35, 30: 7.80, 40: 9.27, STD: 9.27, 60: 12.70, 80: 15.09, XS: 15.09, 100: 18.26, 120: 21.44, 140: 25.40, 160: 28.58 } },
+  { nps: "12", dn: 300, od: 323.85, sch: { 10: 4.57, 20: 6.35, 30: 8.38, STD: 9.53, 40: 10.31, XS: 12.70, 60: 14.27, 80: 17.48, 100: 21.44, 120: 25.40, 140: 28.58, 160: 33.32 } },
+];
+
+function pipeWeightKgM(od_mm, t_mm) {
+  return 0.02466 * (od_mm - t_mm) * t_mm; // verified: matches ASME B36.10 published weights within rounding
+}
+
+// JIS G3192 equal-flange H-beams (kg/m)
+const HBEAM_TABLE = [
+  { size: "H 100×100×6×8", kgm: 17.2 },
+  { size: "H 125×125×6.5×9", kgm: 23.8 },
+  { size: "H 150×150×7×10", kgm: 31.5 },
+  { size: "H 175×175×7.5×11", kgm: 40.2 },
+  { size: "H 200×200×8×12", kgm: 49.9 },
+  { size: "H 250×250×9×14", kgm: 72.4 },
+  { size: "H 300×300×10×15", kgm: 94.0 },
+  { size: "H 350×350×12×19", kgm: 137.0 },
+];
+
+// I-beam, GB/Chinese standard No.10–No.40a (kg/m) — widely available alongside JIS sections in Thailand
+const IBEAM_TABLE = [
+  { size: "I No.10 (100×68×4.5)", kgm: 11.26 },
+  { size: "I No.12 (120×74×5.0)", kgm: 13.99 },
+  { size: "I No.14 (140×80×5.5)", kgm: 16.9 },
+  { size: "I No.16 (160×88×6.0)", kgm: 20.51 },
+  { size: "I No.18 (180×94×6.5)", kgm: 24.14 },
+  { size: "I No.20a (200×100×7.0)", kgm: 27.92 },
+  { size: "I No.22a (220×112×7.5)", kgm: 33.07 },
+  { size: "I No.32a (320×130×9.5)", kgm: 52.72 },
+  { size: "I No.36a (360×136×10)", kgm: 59.0 },
+  { size: "I No.40a (400×142×10.5)", kgm: 67.59 },
+];
+
+// JIS G3192 channel (kg/m) — cross-checked between two independent supplier tables incl. a Thai source
+const CHANNEL_TABLE = [
+  { size: "C 75×40×5×7", kgm: 6.92 },
+  { size: "C 100×50×5×7.5", kgm: 9.36 },
+  { size: "C 125×65×6×8", kgm: 13.40 },
+  { size: "C 150×75×6.5×10", kgm: 18.60 },
+  { size: "C 150×75×9×12.5", kgm: 24.00 },
+  { size: "C 180×75×7×10.5", kgm: 21.40 },
+  { size: "C 200×80×7.5×11", kgm: 24.60 },
+  { size: "C 200×90×8×13.5", kgm: 30.30 },
+  { size: "C 250×90×9×13", kgm: 34.60 },
+  { size: "C 250×90×11×14.5", kgm: 40.20 },
+  { size: "C 300×90×9×13", kgm: 38.10 },
+  { size: "C 300×90×10×15.5", kgm: 43.80 },
+  { size: "C 300×90×12×16", kgm: 48.60 },
+  { size: "C 380×100×10.5×16", kgm: 54.50 },
+  { size: "C 380×100×13×16.5", kgm: 62.00 },
+  { size: "C 380×100×13×20", kgm: 67.30 },
+];
+
+const STEEL_DENSITY = 7850; // kg/m3
+
+// ================= STEEL PROPERTIES PANEL =================
+function SteelPropertiesPanel() {
+  const [section, setSection] = useState("pipe"); // 'pipe' | 'plate' | 'channel' | 'beam'
+
+  // pipe
+  const [pipeNps, setPipeNps] = useState("4");
+  const [pipeSch, setPipeSch] = useState("40");
+  const [pipeLength, setPipeLength] = useState(6.0);
+
+  // plate
+  const [plateThk, setPlateThk] = useState(6);
+  const [plateWidth, setPlateWidth] = useState(1.5);
+  const [plateLength, setPlateLength] = useState(6.0);
+
+  // channel
+  const [channelSize, setChannelSize] = useState(CHANNEL_TABLE[2].size);
+  const [channelLength, setChannelLength] = useState(6.0);
+
+  // beam
+  const [beamType, setBeamType] = useState("H"); // 'H' | 'I'
+  const [beamSize, setBeamSize] = useState(HBEAM_TABLE[3].size);
+  const [beamLength, setBeamLength] = useState(6.0);
+
+  const pipe = useMemo(() => {
+    const row = PIPE_TABLE.find(p => p.nps === pipeNps);
+    const t = row?.sch[pipeSch];
+    if (!row || t === undefined) return null;
+    const od = row.od;
+    const id = od - 2 * t;
+    const kgm = pipeWeightKgM(od, t);
+    const totalWeight = kgm * pipeLength;
+    return { dn: row.dn, od, t, id, kgm, totalWeight, availableSch: Object.keys(row.sch) };
+  }, [pipeNps, pipeSch, pipeLength]);
+
+  const plate = useMemo(() => {
+    const kgm2 = (plateThk / 1000) * STEEL_DENSITY; // kg per m² for this thickness
+    const weight = kgm2 * plateWidth * plateLength;
+    return { kgm2, weight };
+  }, [plateThk, plateWidth, plateLength]);
+
+  const channel = useMemo(() => {
+    const row = CHANNEL_TABLE.find(c => c.size === channelSize);
+    const kgm = row?.kgm ?? 0;
+    return { kgm, weight: kgm * channelLength };
+  }, [channelSize, channelLength]);
+
+  const beam = useMemo(() => {
+    const table = beamType === "H" ? HBEAM_TABLE : IBEAM_TABLE;
+    const row = table.find(b => b.size === beamSize);
+    const kgm = row?.kgm ?? 0;
+    return { kgm, weight: kgm * beamLength };
+  }, [beamType, beamSize, beamLength]);
+
+  return (
+    <div>
+      <StickyResults items={
+        section === "pipe" ? (pipe ? [
+          { label: "OD", value: fmt(pipe.od,2), unit: "mm" },
+          { label: "WT", value: fmt(pipe.t,2), unit: "mm" },
+          { label: "Weight", value: fmt(pipe.kgm,2), unit: "kg/m" },
+        ] : [{ label: "Schedule", value: "not available", unit: "for this size", warn: true }])
+        : section === "plate" ? [
+          { label: "kg/m²", value: fmt(plate.kgm2,2), unit: "" },
+          { label: "Weight", value: fmt(plate.weight,1), unit: "kg" },
+        ]
+        : section === "channel" ? [
+          { label: "Unit weight", value: fmt(channel.kgm,2), unit: "kg/m" },
+          { label: "Weight", value: fmt(channel.weight,1), unit: "kg" },
+        ] : [
+          { label: "Unit weight", value: fmt(beam.kgm,2), unit: "kg/m" },
+          { label: "Weight", value: fmt(beam.weight,1), unit: "kg" },
+        ]
+      } />
+
+      <Plate title="Section">
+        <div className="grid grid-cols-2 gap-2 mb-1">
+          <button onClick={() => setSection("pipe")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${section === "pipe" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Pipe schedule</button>
+          <button onClick={() => setSection("plate")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${section === "plate" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Plate</button>
+          <button onClick={() => setSection("channel")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${section === "channel" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Channel</button>
+          <button onClick={() => setSection("beam")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${section === "beam" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Beam</button>
+        </div>
+      </Plate>
+
+      {section === "pipe" && (
+        <>
+          <Plate title="Inputs">
+            <Select label="Nominal pipe size (NPS)" value={pipeNps} onChange={(v) => { setPipeNps(v); const row = PIPE_TABLE.find(p => p.nps === v); if (row && !row.sch[pipeSch]) setPipeSch(Object.keys(row.sch)[0]); }} options={PIPE_TABLE.map(p => ({ label: p.nps }))} />
+            <Select label="Schedule" value={pipeSch} onChange={setPipeSch} options={(PIPE_TABLE.find(p => p.nps === pipeNps)?.sch ? Object.keys(PIPE_TABLE.find(p => p.nps === pipeNps).sch) : []).map(s => ({ label: s }))} />
+            <Field label="Length" unit="m" step="0.1" value={pipeLength} onChange={setPipeLength} />
+          </Plate>
+          {pipe && (
+            <Plate title="Pipe dimensions & weight (ASME B36.10M)">
+              <Readout label="DN" value={fmt(pipe.dn,0)} unit="mm" />
+              <Readout label="Outside diameter (OD)" value={fmt(pipe.od,2)} unit="mm" big />
+              <Readout label="Wall thickness" value={fmt(pipe.t,2)} unit="mm" big />
+              <Readout label="Inside diameter (ID)" value={fmt(pipe.id,2)} unit="mm" />
+              <Readout label="Unit weight" value={fmt(pipe.kgm,2)} unit="kg/m" big />
+              <Readout label={`Total weight (${fmt(pipeLength,1)}m)`} value={fmt(pipe.totalWeight,1)} unit="kg" />
+              <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+                Covers NPS 1/2"–12". STD and Sch40 (and XS/Sch80) are shown separately since they diverge
+                above NPS 10 — e.g. at NPS 12, STD = 9.53mm but Sch40 = 10.31mm. Don't assume they're
+                interchangeable at larger sizes. For NPS 14" and above, consult ASME B36.10M directly.
+              </div>
+            </Plate>
+          )}
+        </>
+      )}
+
+      {section === "plate" && (
+        <>
+          <Plate title="Inputs">
+            <Field label="Thickness" unit="mm" step="0.5" value={plateThk} onChange={setPlateThk} />
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Width" unit="m" step="0.05" value={plateWidth} onChange={setPlateWidth} />
+              <Field label="Length" unit="m" step="0.1" value={plateLength} onChange={setPlateLength} hint="Standard mill length is often 6.0m." />
+            </div>
+          </Plate>
+          <Plate title="Plate weight">
+            <Readout label="Weight per m²" value={fmt(plate.kgm2,2)} unit="kg/m²" />
+            <Readout label="Sheet weight" value={fmt(plate.weight,1)} unit="kg" big />
+            <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+              Pure geometry: thickness × width × length × 7850 kg/m³. Rule of thumb: 1mm thickness ≈
+              7.85 kg/m², so a 6mm plate ≈ 47.1 kg/m² — quick to sanity-check by hand.
+            </div>
+          </Plate>
+        </>
+      )}
+
+      {section === "channel" && (
+        <>
+          <Plate title="Inputs">
+            <Select label="Channel size (JIS)" value={channelSize} onChange={setChannelSize} options={CHANNEL_TABLE.map(c => ({ label: c.size }))} />
+            <Field label="Length" unit="m" step="0.1" value={channelLength} onChange={setChannelLength} hint="Standard mill length is often 6.0m." />
+          </Plate>
+          <Plate title="Channel weight">
+            <Readout label="Unit weight" value={fmt(channel.kgm,2)} unit="kg/m" big />
+            <Readout label={`Piece weight (${fmt(channelLength,1)}m)`} value={fmt(channel.weight,1)} unit="kg" big />
+          </Plate>
+        </>
+      )}
+
+      {section === "beam" && (
+        <>
+          <Plate title="Inputs">
+            <div className="flex gap-2 mb-3">
+              <button onClick={() => { setBeamType("H"); setBeamSize(HBEAM_TABLE[0].size); }} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${beamType === "H" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>H-beam (JIS, equal flange)</button>
+              <button onClick={() => { setBeamType("I"); setBeamSize(IBEAM_TABLE[0].size); }} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${beamType === "I" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>I-beam (GB standard)</button>
+            </div>
+            <Select label="Size" value={beamSize} onChange={setBeamSize} options={(beamType === "H" ? HBEAM_TABLE : IBEAM_TABLE).map(b => ({ label: b.size }))} />
+            <Field label="Length" unit="m" step="0.1" value={beamLength} onChange={setBeamLength} hint="Standard mill length is often 6.0m." />
+          </Plate>
+          <Plate title="Beam weight">
+            <Readout label="Unit weight" value={fmt(beam.kgm,2)} unit="kg/m" big />
+            <Readout label={`Piece weight (${fmt(beamLength,1)}m)`} value={fmt(beam.weight,1)} unit="kg" big />
+          </Plate>
+        </>
+      )}
+
+      <div className="text-[10px] text-neutral-500 leading-relaxed px-1">
+        Pipe dimensions from ASME B36.10M (cross-checked against published weight data). H-beam, I-beam,
+        and channel unit weights from JIS G3192 / commonly available GB-standard supplier data, cross-checked
+        between independent sources including a Thai supplier's published table for channels. Actual mill
+        tolerances mean real piece weights can vary a percent or two — confirm against the mill certificate
+        for anything going into a final BOQ.
+      </div>
+    </div>
+  );
+}
+
+// ================= UNIT CONVERTER =================
+const UNIT_CATEGORIES = {
+  Pressure: { base: "kPa", units: { kPa: 1, MPa: 1000, bar: 100, psi: 6.89476, "kgf/cm²": 98.0665, mmHg: 0.133322, atm: 101.325 } },
+  Flow: { base: "m³/hr", units: { "m³/hr": 1, "m³/s": 3600, "L/min": 0.06, "US gpm": 0.227125, "kg/hr (water)": 0.001 } },
+  Power: { base: "kW", units: { kW: 1, HP: 0.7457, "BTU/hr": 0.000293071, "kcal/hr": 0.00116222, MW: 1000 } },
+  Length: { base: "m", units: { m: 1, mm: 0.001, cm: 0.01, in: 0.0254, ft: 0.3048, km: 1000 } },
+  Mass: { base: "kg", units: { kg: 1, ton: 1000, lb: 0.453592, g: 0.001 } },
+};
+
+function UnitConverterPanel() {
+  const [category, setCategory] = useState("Pressure");
+  const [fromUnit, setFromUnit] = useState("bar");
+  const [toUnit, setToUnit] = useState("psi");
+  const [value, setValue] = useState(1);
+  const [tempFrom, setTempFrom] = useState("C");
+  const [tempValue, setTempValue] = useState(100);
+
+  const cat = UNIT_CATEGORIES[category];
+  const unitList = category === "Temperature" ? ["C", "F", "K"] : Object.keys(cat.units);
+
+  const result = useMemo(() => {
+    if (category === "Temperature") {
+      let c;
+      if (tempFrom === "C") c = tempValue;
+      else if (tempFrom === "F") c = (tempValue - 32) * 5 / 9;
+      else c = tempValue - 273.15;
+      return { C: c, F: c * 9 / 5 + 32, K: c + 273.15 };
+    }
+    const baseVal = value * cat.units[fromUnit];
+    const converted = baseVal / cat.units[toUnit];
+    return { converted };
+  }, [category, fromUnit, toUnit, value, tempFrom, tempValue, cat]);
+
+  return (
+    <div>
+      <StickyResults items={
+        category === "Temperature"
+          ? [{ label: "°C", value: fmt(result.C,2), unit: "" }, { label: "°F", value: fmt(result.F,2), unit: "" }, { label: "K", value: fmt(result.K,2), unit: "" }]
+          : [{ label: "Result", value: fmt(result.converted,4), unit: toUnit }]
+      } />
+
+      <Plate title="Inputs">
+        <Select label="Category" value={category} onChange={(v) => {
+          setCategory(v);
+          if (v !== "Temperature") {
+            const units = Object.keys(UNIT_CATEGORIES[v].units);
+            setFromUnit(units[0]); setToUnit(units[1] ?? units[0]);
+          }
+        }} options={[...Object.keys(UNIT_CATEGORIES), "Temperature"].map(c => ({ label: c }))} />
+
+        {category === "Temperature" ? (
+          <>
+            <Field label="Value" unit="" step="0.1" value={tempValue} onChange={setTempValue} />
+            <Select label="Unit" value={tempFrom} onChange={setTempFrom} options={["C","F","K"].map(u => ({ label: u }))} />
+          </>
+        ) : (
+          <>
+            <Field label="Value" unit="" step="0.01" value={value} onChange={setValue} />
+            <div className="grid grid-cols-2 gap-x-3">
+              <Select label="From" value={fromUnit} onChange={setFromUnit} options={unitList.map(u => ({ label: u }))} />
+              <Select label="To" value={toUnit} onChange={setToUnit} options={unitList.map(u => ({ label: u }))} />
+            </div>
+          </>
+        )}
+      </Plate>
+
+      {category !== "Temperature" && (
+        <Plate title="Result">
+          <Readout label={`${fmt(value,2)} ${fromUnit} =`} value={fmt(result.converted,4)} unit={toUnit} big />
+        </Plate>
+      )}
+    </div>
+  );
+}
+
+// ================= BOLT TORQUE CALCULATOR =================
+const BOLT_AS_TABLE = { M8: 36.6, M10: 58.0, M12: 84.3, M14: 115, M16: 157, M18: 192, M20: 245, M22: 303, M24: 353, M27: 459, M30: 561, M33: 694, M36: 817 };
+const PROOF_STRESS_TABLE = { "4.6": 225, "8.8": 660, "10.9": 940, "12.9": 1100, "A193-B7": 720 };
+const K_FACTOR_OPTIONS = [
+  { label: "As received / dry (K≈0.20)", K: 0.20 },
+  { label: "Lightly oiled (K≈0.18)", K: 0.18 },
+  { label: "PTFE / moly-coated (K≈0.13)", K: 0.13 },
+];
+
+function BoltTorquePanel() {
+  const [boltSize, setBoltSize] = useState("M20");
+  const [propClass, setPropClass] = useState("8.8");
+  const [kLabel, setKLabel] = useState(K_FACTOR_OPTIONS[0].label);
+  const [utilPct, setUtilPct] = useState(75);
+
+  const calc = useMemo(() => {
+    const As = BOLT_AS_TABLE[boltSize];
+    const proof = PROOF_STRESS_TABLE[propClass];
+    const K = K_FACTOR_OPTIONS.find(k => k.label === kLabel)?.K ?? 0.2;
+    const D_mm = parseFloat(boltSize.replace("M", ""));
+    const preload_N = As * proof * (utilPct / 100);
+    const torque_Nm = K * (D_mm / 1000) * preload_N;
+    return { As, proof, K, D_mm, preload_N, torque_Nm };
+  }, [boltSize, propClass, kLabel, utilPct]);
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "Preload", value: fmt(calc.preload_N/1000,1), unit: "kN" },
+        { label: "Torque", value: fmt(calc.torque_Nm,1), unit: "N·m" },
+      ]} />
+
+      <Plate title="Inputs">
+        <Select label="Bolt size" value={boltSize} onChange={setBoltSize} options={Object.keys(BOLT_AS_TABLE).map(b => ({ label: b }))} />
+        <Select label="Property class" value={propClass} onChange={setPropClass} options={Object.keys(PROOF_STRESS_TABLE).map(p => ({ label: p }))} />
+        <Select label="Friction condition (K factor)" value={kLabel} onChange={setKLabel} options={K_FACTOR_OPTIONS.map(k => ({ label: k.label }))} />
+        <Field label="Target utilization of proof load" unit="%" step="1" value={utilPct} onChange={setUtilPct} hint="75% of proof load is a common assembly target; adjust per your standard/spec." />
+      </Plate>
+
+      <Plate title="Result">
+        <Readout label="Tensile stress area" value={fmt(calc.As,1)} unit="mm²" />
+        <Readout label="Proof stress" value={fmt(calc.proof,0)} unit="MPa" />
+        <Readout label="Target preload" value={fmt(calc.preload_N/1000,2)} unit="kN" big />
+        <Readout label="Recommended torque" value={fmt(calc.torque_Nm,1)} unit="N·m" big />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          Formula: T = K × D × F (short-form nut-factor method) — standard approach for general bolted
+          joints, but NOT a substitute for a gasket manufacturer's recommended seating stress on flanged
+          joints (spiral-wound gaskets typically need 55–70 MPa seating stress, which can govern over the
+          pure bolt-strength calc here). Cross-check against your bolting standard/spec where one applies.
+        </div>
+      </Plate>
+    </div>
+  );
+}
+
+// ================= MOTOR FLA & CABLE SIZING =================
+function MotorCablePanel() {
+  const [kW, setKW] = useState(30);
+  const [voltage, setVoltage] = useState(400);
+  const [powerFactor, setPowerFactor] = useState(0.85);
+  const [efficiency, setEfficiency] = useState(0.90);
+  const [cableLength, setCableLength] = useState(50);
+  const [allowedDropPct, setAllowedDropPct] = useState(2.5);
+  const [conductorTemp, setConductorTemp] = useState("70");
+
+  const RHO_TABLE = { "20": 0.0178, "70": 0.0212, "90": 0.0225 }; // copper resistivity, ohm.mm2/m, by conductor temp (C)
+
+  const calc = useMemo(() => {
+    const FLA = (kW * 1000) / (Math.sqrt(3) * voltage * powerFactor * efficiency);
+    const rho = RHO_TABLE[conductorTemp];
+    const allowedDropV = voltage * (allowedDropPct / 100);
+    const csaReq = (Math.sqrt(3) * FLA * cableLength * rho) / allowedDropV;
+    return { FLA, rho, allowedDropV, csaReq };
+  }, [kW, voltage, powerFactor, efficiency, cableLength, allowedDropPct, conductorTemp]);
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "FLA", value: fmt(calc.FLA,1), unit: "A" },
+        { label: "Min. CSA (V-drop)", value: fmt(calc.csaReq,1), unit: "mm²" },
+      ]} />
+
+      <Plate title="Inputs">
+        <SubHeader>Motor</SubHeader>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Motor rating" unit="kW" step="0.5" value={kW} onChange={setKW} />
+          <Field label="Supply voltage" unit="V (3-ph, L-L)" step="10" value={voltage} onChange={setVoltage} />
+        </div>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Power factor" unit="0–1" step="0.01" value={powerFactor} onChange={setPowerFactor} hint="~0.80–0.88 typical for induction motors near full load." />
+          <Field label="Efficiency" unit="0–1" step="0.01" value={efficiency} onChange={setEfficiency} hint="~0.88–0.95 depending on size/IE class." />
+        </div>
+        <div className="mt-1 text-[10px] text-neutral-500 leading-relaxed">
+          This estimates FLA from rated power — always use the motor's actual nameplate FLA once one is
+          selected, since PF/efficiency vary by manufacturer and this is only a pre-selection estimate.
+        </div>
+
+        <SubHeader>Cable (voltage drop check)</SubHeader>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="One-way cable length" unit="m" step="1" value={cableLength} onChange={setCableLength} />
+          <Field label="Allowed voltage drop" unit="%" step="0.1" value={allowedDropPct} onChange={setAllowedDropPct} hint="2–3% for a motor feeder is a common target; check your site standard." />
+        </div>
+        <Select label="Conductor operating temp (resistivity)" value={conductorTemp} onChange={setConductorTemp} options={[{label:"20"},{label:"70"},{label:"90"}]} />
+      </Plate>
+
+      <Plate title="Result">
+        <Readout label="Full load current (FLA)" value={fmt(calc.FLA,1)} unit="A" big />
+        <Readout label="Allowed voltage drop" value={fmt(calc.allowedDropV,1)} unit="V" />
+        <Readout label="Minimum CSA for voltage drop" value={fmt(calc.csaReq,2)} unit="mm²" big />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          This checks voltage drop only (simplified resistive model, ignoring reactance — reasonable for
+          smaller cables, less accurate above roughly 95mm²). It does NOT check current-carrying capacity
+          (ampacity), which depends on installation method (conduit, tray, buried, grouping) and is a
+          separate check against the cable manufacturer's rating table or IEC 60364-5-52 — always confirm
+          the larger of the two required sizes governs your final selection.
+        </div>
+      </Plate>
+    </div>
+  );
+}
+
+// ================= 4-20mA / PLC SIGNAL SCALING =================
+function SignalScalingPanel() {
+  const [maMin, setMaMin] = useState(4);
+  const [maMax, setMaMax] = useState(20);
+  const [countMin, setCountMin] = useState(0);
+  const [countMax, setCountMax] = useState(27648);
+  const [euMin, setEuMin] = useState(0);
+  const [euMax, setEuMax] = useState(100);
+  const [euLabel, setEuLabel] = useState("°C");
+
+  const [knownType, setKnownType] = useState("mA"); // 'mA' | 'count' | 'eu'
+  const [knownValue, setKnownValue] = useState(12);
+
+  const calc = useMemo(() => {
+    let frac;
+    if (knownType === "mA") frac = (knownValue - maMin) / (maMax - maMin);
+    else if (knownType === "count") frac = (knownValue - countMin) / (countMax - countMin);
+    else frac = (knownValue - euMin) / (euMax - euMin);
+
+    const mA = maMin + frac * (maMax - maMin);
+    const count = countMin + frac * (countMax - countMin);
+    const eu = euMin + frac * (euMax - euMin);
+    const outOfRange = frac < 0 || frac > 1;
+    return { frac, mA, count, eu, outOfRange };
+  }, [knownType, knownValue, maMin, maMax, countMin, countMax, euMin, euMax]);
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "mA", value: fmt(calc.mA,3), unit: "" },
+        { label: "PLC count", value: fmt(calc.count,0), unit: "" },
+        { label: "EU", value: fmt(calc.eu,2), unit: euLabel, warn: calc.outOfRange },
+      ]} />
+
+      <Plate title="Inputs">
+        <SubHeader>Ranges</SubHeader>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Signal min" unit="mA" step="0.1" value={maMin} onChange={setMaMin} />
+          <Field label="Signal max" unit="mA" step="0.1" value={maMax} onChange={setMaMax} />
+        </div>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="PLC raw count min" unit="" step="1" value={countMin} onChange={setCountMin} />
+          <Field label="PLC raw count max" unit="" step="1" value={countMax} onChange={setCountMax} hint="27648 is common for Siemens/Delta scaled analog input; adjust for your PLC." />
+        </div>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Engineering unit min" unit="" step="0.1" value={euMin} onChange={setEuMin} />
+          <Field label="Engineering unit max" unit="" step="0.1" value={euMax} onChange={setEuMax} />
+        </div>
+        <TextField label="Engineering unit label" value={euLabel} onChange={setEuLabel} placeholder="e.g. °C, kg/hr, bar" />
+
+        <SubHeader>Known value</SubHeader>
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setKnownType("mA")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${knownType === "mA" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>mA</button>
+          <button onClick={() => setKnownType("count")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${knownType === "count" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>PLC count</button>
+          <button onClick={() => setKnownType("eu")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${knownType === "eu" ? "bg-emerald-500 text-neutral-950 border-emerald-500" : "border-neutral-700 text-neutral-300"}`}>EU</button>
+        </div>
+        <Field label={`Known value (${knownType === "mA" ? "mA" : knownType === "count" ? "PLC count" : euLabel})`} step="0.01" value={knownValue} onChange={setKnownValue} />
+      </Plate>
+
+      <Plate title="Result">
+        <Readout label="Signal" value={fmt(calc.mA,3)} unit="mA" big />
+        <Readout label="PLC raw count" value={fmt(calc.count,0)} unit="" big />
+        <Readout label="Engineering unit" value={fmt(calc.eu,3)} unit={euLabel} big />
+        {calc.outOfRange && (
+          <div className="mt-2 text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1.5">
+            Known value is outside the configured 0–100% range — check for sensor fault, over-range, or a
+            range/scaling mismatch.
+          </div>
+        )}
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          Straight linear scaling between the three ranges — matches standard PLC analog input scaling
+          (e.g. 4–20mA over 0–27648 counts). Doesn't account for transmitter damping, sensor non-linearity,
+          or square-root extraction (common on DP flow transmitters) — apply those separately if relevant.
+        </div>
+      </Plate>
+    </div>
+  );
+}
+
+// ================= INSULATION SELECTION HELPERS =================
+// Thermal conductivity model: linear interpolation on density between published reference points at
+// two mean temperatures (10C, 100C), then linear interpolation/extrapolation on mean temperature.
+// Reference data (ScienceDirect "Mineral Wool" overview, cross-consistent with several manufacturer
+// datasheets showing glass wool ~0.030-0.045 W/mK and rock wool ~0.033-0.045 W/mK in this density range):
+//   Glass wool: 10 kg/m³ -> 0.040 W/mK @10°C, 0.070 W/mK @100°C
+//               75 kg/m³ -> 0.030 W/mK @10°C, 0.044 W/mK @100°C
+//   Rock wool:  23 kg/m³ -> 0.037 W/mK @10°C, 0.052 W/mK @100°C
+//               200 kg/m³-> 0.033 W/mK @10°C, 0.042 W/mK @100°C
+function insulationK(material, density, Tmean) {
+  let d0, d1, k10_0, k10_1, k100_0, k100_1;
+  if (material === "glass") { d0 = 10; d1 = 75; k10_0 = 0.040; k10_1 = 0.030; k100_0 = 0.070; k100_1 = 0.044; }
+  else { d0 = 23; d1 = 200; k10_0 = 0.037; k10_1 = 0.033; k100_0 = 0.052; k100_1 = 0.042; }
+  const f = Math.max(0, Math.min(1, (density - d0) / (d1 - d0)));
+  const k10 = k10_0 + f * (k10_1 - k10_0);
+  const k100 = k100_0 + f * (k100_1 - k100_0);
+  return k10 + (Tmean - 10) * (k100 - k10) / 90;
+}
+
+const JACKET_OPTIONS = [
+  { label: "Aluminum jacket, bright (ε≈0.10)", eps: 0.10 },
+  { label: "Aluminum jacket, weathered (ε≈0.30)", eps: 0.30 },
+  { label: "Painted metal / canvas (ε≈0.90)", eps: 0.90 },
+];
+
+// Iterative solve for outer surface temperature — pipe (cylindrical) case
+function solvePipeInsulation(Ti, Ta, od_mm, t_mm, material, density, emissivity) {
+  const r1 = od_mm / 2000, r2 = r1 + t_mm / 1000;
+  let lo = Ta, hi = Ti;
+  for (let i = 0; i < 60; i++) {
+    const Ts = (lo + hi) / 2;
+    const Tmean = (Ti + Ts) / 2;
+    const k = insulationK(material, density, Tmean);
+    const Rins = Math.log(r2 / r1) / (2 * Math.PI * k);
+    const Q_through = (Ti - Ts) / Rins;
+    const dT = Math.max(0.001, Ts - Ta);
+    const hConv = 1.32 * Math.pow(dT / (2 * r2), 0.25);
+    const hRad = emissivity * 5.67e-8 * (Math.pow(Ts + 273.15, 4) - Math.pow(Ta + 273.15, 4)) / dT;
+    const Q_out = (hConv + hRad) * (2 * Math.PI * r2) * dT;
+    if (Q_through > Q_out) lo = Ts; else hi = Ts;
+  }
+  const Ts = (lo + hi) / 2;
+  const Tmean = (Ti + Ts) / 2;
+  const k = insulationK(material, density, Tmean);
+  const Rins = Math.log(r2 / r1) / (2 * Math.PI * k);
+  const Q = (Ti - Ts) / Rins; // W/m run
+  return { Ts, k, Q };
+}
+
+// Iterative solve — flat wall case (per m²)
+function solveFlatInsulation(Ti, Ta, t_mm, material, density, emissivity) {
+  const t = t_mm / 1000;
+  let lo = Ta, hi = Ti;
+  for (let i = 0; i < 60; i++) {
+    const Ts = (lo + hi) / 2;
+    const Tmean = (Ti + Ts) / 2;
+    const k = insulationK(material, density, Tmean);
+    const Q_through = k * (Ti - Ts) / t;
+    const dT = Math.max(0.001, Ts - Ta);
+    const hConv = 1.42 * Math.pow(dT / 1.0, 0.25); // Lc=1m assumed vertical surface
+    const hRad = emissivity * 5.67e-8 * (Math.pow(Ts + 273.15, 4) - Math.pow(Ta + 273.15, 4)) / dT;
+    const Q_out = (hConv + hRad) * dT;
+    if (Q_through > Q_out) lo = Ts; else hi = Ts;
+  }
+  const Ts = (lo + hi) / 2;
+  const Tmean = (Ti + Ts) / 2;
+  const k = insulationK(material, density, Tmean);
+  const Q = k * (Ti - Ts) / t; // W/m2
+  return { Ts, k, Q };
+}
+
+const STANDARD_THICKNESSES_MM = [25, 50, 75, 100]; // 1", 2", 3", 4"
+const THICKNESS_LABELS = { 25: "1\"", 50: "2\"", 75: "3\"", 100: "4\"" };
+
+// ================= INSULATION PANEL =================
+function InsulationPanel() {
+  const [surfaceType, setSurfaceType] = useState("pipe"); // 'pipe' | 'flat'
+  const [pipeOd, setPipeOd] = useState(114.3);
+  const [material, setMaterial] = useState("rock"); // 'glass' | 'rock'
+  const [density, setDensity] = useState(100);
+  const [processTemp, setProcessTemp] = useState(150);
+  const [ambientTemp, setAmbientTemp] = useState(33); // typical hot-season day, Thailand
+  const [jacketLabel, setJacketLabel] = useState(JACKET_OPTIONS[0].label);
+  const [safetyLimit, setSafetyLimit] = useState(60);
+
+  const emissivity = JACKET_OPTIONS.find(j => j.label === jacketLabel)?.eps ?? 0.15;
+  const densityRangeHint = material === "glass" ? "typical range ~10–75 kg/m³" : "typical range ~23–200 kg/m³";
+
+  const results = useMemo(() => {
+    return STANDARD_THICKNESSES_MM.map(t => {
+      const r = surfaceType === "pipe"
+        ? solvePipeInsulation(processTemp, ambientTemp, pipeOd, t, material, density, emissivity)
+        : solveFlatInsulation(processTemp, ambientTemp, t, material, density, emissivity);
+      return { t, ...r, safe: r.Ts <= safetyLimit };
+    });
+  }, [surfaceType, pipeOd, material, density, processTemp, ambientTemp, emissivity, safetyLimit]);
+
+  const recommended = results.find(r => r.safe);
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "Recommended", value: recommended ? THICKNESS_LABELS[recommended.t] : "≥4\" needed", unit: "", warn: !recommended },
+        { label: "Surface temp", value: recommended ? fmt(recommended.Ts,1) : fmt(results[results.length-1].Ts,1), unit: "°C" },
+      ]} />
+
+      <Plate title="Inputs">
+        <SubHeader>Surface</SubHeader>
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setSurfaceType("pipe")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${surfaceType === "pipe" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Pipe (cylindrical)</button>
+          <button onClick={() => setSurfaceType("flat")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${surfaceType === "flat" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Flat wall / tank</button>
+        </div>
+        {surfaceType === "pipe" && (
+          <Field label="Pipe outside diameter" unit="mm" step="1" value={pipeOd} onChange={setPipeOd} hint="Check the Steel Properties tab for standard pipe OD by NPS/schedule." />
+        )}
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Process / surface temperature" unit="°C" step="1" value={processTemp} onChange={setProcessTemp} />
+          <Field label="Ambient temperature" unit="°C" step="1" value={ambientTemp} onChange={setAmbientTemp} hint="Default 33°C is a typical Thailand hot-season day — adjust for your site." />
+        </div>
+
+        <SubHeader>Insulation material</SubHeader>
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setMaterial("glass")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${material === "glass" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Glass wool</button>
+          <button onClick={() => setMaterial("rock")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${material === "rock" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Rock wool</button>
+        </div>
+        <Field label="Density" unit="kg/m³" step="1" value={density} onChange={setDensity} hint={densityRangeHint} />
+        <Select label="Outer jacket / cladding" value={jacketLabel} onChange={setJacketLabel} options={JACKET_OPTIONS.map(j => ({ label: j.label }))} />
+        <Field label="Surface temperature safety limit" unit="°C" step="1" value={safetyLimit} onChange={setSafetyLimit} hint="60°C is a common personnel-protection ('touch-safe') target; some standards use 50°C." />
+      </Plate>
+
+      <Plate title="Thickness comparison">
+        {results.map((r) => (
+          <div key={r.t} className={`flex items-center justify-between py-2 border-b border-neutral-800 last:border-0 ${r === recommended ? "bg-emerald-950/20 -mx-3 px-3 rounded" : ""}`}>
+            <div>
+              <div className="text-sm font-bold text-neutral-100">{THICKNESS_LABELS[r.t]} ({r.t}mm)</div>
+              <div className="text-[10px] text-neutral-500">k = {fmt(r.k*1000,1)} mW/m·K at mean temp</div>
+            </div>
+            <div className="text-right">
+              <div className={`font-mono font-bold ${r.safe ? "text-emerald-400" : "text-red-400"}`}>{fmt(r.Ts,1)}°C</div>
+              <div className="text-[10px] text-neutral-500">
+                {fmt(r.Q,1)} W/{surfaceType === "pipe" ? "m" : "m²"}
+              </div>
+            </div>
+          </div>
+        ))}
+        {recommended ? (
+          <div className="mt-3 text-[11px] text-emerald-400 bg-emerald-950/30 border border-emerald-900 rounded px-2 py-1.5">
+            {THICKNESS_LABELS[recommended.t]} is the thinnest option that brings the surface to or below your {fmt(safetyLimit,0)}°C limit.
+          </div>
+        ) : (
+          <div className="mt-3 text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1.5">
+            None of the standard thicknesses up to 4" reach your {fmt(safetyLimit,0)}°C limit at this process
+            temperature — consider a thicker layer, a double-layer system, or a lower-conductivity material.
+          </div>
+        )}
+      </Plate>
+
+      <div className="text-[10px] text-neutral-500 leading-relaxed px-1">
+        Conductivity (k) is modeled from published density- and mean-temperature-dependent reference data for
+        glass/rock wool — verify against your actual product's datasheet for anything final, since real
+        products vary by manufacturer. Outer surface heat transfer uses natural-convection + radiation
+        correlations for still air; outdoor/windy conditions will run cooler with higher heat loss (forced
+        convection isn't modeled here). Heat loss figures assume steady-state, single-layer insulation with
+        no thermal bridging (bands, supports, penetrations) — real installed performance is typically somewhat
+        worse than this ideal calculation.
+      </div>
+    </div>
+  );
+}
+
+// ================= SYSTEM PRESSURE DROP HELPERS =================
+const PD_COMPONENT_TYPES = [
+  "Furnace / combustion chamber",
+  "Boiler convection bank",
+  "Multicyclone / dust collector",
+  "Wet scrubber (venturi)",
+  "Ductwork (straight, friction)",
+  "Duct fitting (elbow/tee/damper)",
+  "Other / manual entry",
+];
+
+const FITTING_K_PRESETS = [
+  { label: "90° elbow, long radius", K: 0.3 },
+  { label: "90° elbow, short radius", K: 0.75 },
+  { label: "45° elbow", K: 0.2 },
+  { label: "Tee, branch flow", K: 1.0 },
+  { label: "Damper, fully open", K: 0.2 },
+  { label: "Sudden expansion", K: 0.5 },
+  { label: "Custom K", K: null },
+];
+
+function newPdRow(type) {
+  return {
+    id: Math.random().toString(36).slice(2),
+    type: type || PD_COMPONENT_TYPES[0],
+    description: "",
+    manualPa: 200,
+    velocity: 18,
+    density: 0.95,
+    nH: 8,
+    length: 10,
+    diameter: 600,
+    frictionFactor: 0.02,
+    fittingPreset: FITTING_K_PRESETS[0].label,
+    customK: 0.3,
+  };
+}
+
+function pdRowResult(row) {
+  const rho = row.density;
+  switch (row.type) {
+    case "Multicyclone / dust collector":
+      return row.nH * 0.5 * rho * row.velocity ** 2;
+    case "Ductwork (straight, friction)":
+      return row.frictionFactor * (row.length / (row.diameter / 1000)) * 0.5 * rho * row.velocity ** 2;
+    case "Duct fitting (elbow/tee/damper)": {
+      const preset = FITTING_K_PRESETS.find(k => k.label === row.fittingPreset);
+      const K = preset && preset.K !== null ? preset.K : row.customK;
+      return K * 0.5 * rho * row.velocity ** 2;
+    }
+    default:
+      return row.manualPa;
+  }
+}
+
+// ================= SYSTEM PRESSURE DROP PANEL =================
+function SystemPressureDropPanel() {
+  const [rows, setRows] = useState([
+    { ...newPdRow("Furnace / combustion chamber"), manualPa: 100, description: "Furnace / grate" },
+    { ...newPdRow("Boiler convection bank"), manualPa: 350, description: "Boiler passes" },
+    { ...newPdRow("Multicyclone / dust collector"), velocity: 18, density: 0.95, nH: 8, description: "Multicyclone" },
+    { ...newPdRow("Wet scrubber (venturi)"), manualPa: 1500, description: "Venturi scrubber" },
+    { ...newPdRow("Ductwork (straight, friction)"), length: 15, diameter: 800, velocity: 12, density: 0.95, description: "Main duct run" },
+    { ...newPdRow("Duct fitting (elbow/tee/damper)"), velocity: 12, density: 0.95, fittingPreset: "90° elbow, long radius", description: "Elbows (x2)" },
+  ]);
+
+  const addRow = () => setRows([...rows, newPdRow()]);
+  const removeRow = (id) => setRows(rows.filter(r => r.id !== id));
+  const updateRow = (id, field, val) => setRows(rows.map(r => (r.id === id ? { ...r, [field]: val } : r)));
+
+  const results = useMemo(() => rows.map(r => ({ ...r, dP: pdRowResult(r) })), [rows]);
+  const total = useMemo(() => results.reduce((s, r) => s + r.dP, 0), [results]);
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "Total ΔP", value: fmt(total,0), unit: "Pa" },
+        { label: "Total ΔP", value: fmt(total/9.81,1), unit: "mmH₂O" },
+        { label: "Components", value: fmt(rows.length,0), unit: "" },
+      ]} />
+
+      <Plate title="Component list">
+        {results.map((r) => (
+          <div key={r.id} className="border border-neutral-800 rounded p-3 mb-3 relative">
+            <button onClick={() => removeRow(r.id)} className="absolute top-2 right-2 text-neutral-500 hover:text-red-400 text-xs px-1">✕</button>
+            <Select label="Component type" value={r.type} onChange={(v) => updateRow(r.id, "type", v)} options={PD_COMPONENT_TYPES.map(t => ({ label: t }))} />
+            <TextField label="Description / tag" value={r.description} onChange={(v) => updateRow(r.id, "description", v)} placeholder="e.g. Duct run to stack" />
+
+            {(r.type === "Furnace / combustion chamber" || r.type === "Boiler convection bank" || r.type === "Wet scrubber (venturi)" || r.type === "Other / manual entry") && (
+              <>
+                <Field label="Pressure drop" unit="Pa" step="10" value={r.manualPa} onChange={(v) => updateRow(r.id, "manualPa", v)} hint={
+                  r.type === "Furnace / combustion chamber" ? "Typically 50–150 Pa for biomass step-grate furnaces — confirm against boiler design data." :
+                  r.type === "Boiler convection bank" ? "Typically 200–600 Pa depending on pass design and fouling — confirm against boiler data sheet." :
+                  r.type === "Wet scrubber (venturi)" ? "Typically 1000–3000+ Pa depending on venturi throat design ΔP setpoint — confirm against scrubber design." :
+                  "Enter a known or vendor-quoted value."
+                } />
+              </>
+            )}
+
+            {r.type === "Multicyclone / dust collector" && (
+              <>
+                <div className="grid grid-cols-2 gap-x-3">
+                  <Field label="Inlet velocity" unit="m/s" step="0.5" value={r.velocity} onChange={(v) => updateRow(r.id, "velocity", v)} hint="Typical cyclone inlet design velocity ~15–20 m/s." />
+                  <Field label="Gas density" unit="kg/m³" step="0.01" value={r.density} onChange={(v) => updateRow(r.id, "density", v)} />
+                </div>
+                <Field label="Velocity heads (Nh)" unit="—" step="0.5" value={r.nH} onChange={(v) => updateRow(r.id, "nH", v)} hint="6–10 typical for a well-designed multicyclone; confirm against the specific unit's data." />
+              </>
+            )}
+
+            {r.type === "Ductwork (straight, friction)" && (
+              <>
+                <div className="grid grid-cols-2 gap-x-3">
+                  <Field label="Duct length" unit="m" step="1" value={r.length} onChange={(v) => updateRow(r.id, "length", v)} />
+                  <Field label="Duct diameter" unit="mm" step="10" value={r.diameter} onChange={(v) => updateRow(r.id, "diameter", v)} hint="Use equivalent diameter for rectangular ducts." />
+                </div>
+                <div className="grid grid-cols-2 gap-x-3">
+                  <Field label="Velocity" unit="m/s" step="0.5" value={r.velocity} onChange={(v) => updateRow(r.id, "velocity", v)} />
+                  <Field label="Gas density" unit="kg/m³" step="0.01" value={r.density} onChange={(v) => updateRow(r.id, "density", v)} />
+                </div>
+                <Field label="Friction factor" unit="—" step="0.001" value={r.frictionFactor} onChange={(v) => updateRow(r.id, "frictionFactor", v)} hint="~0.02 typical for galvanized/steel ductwork (Darcy-Weisbach)." />
+              </>
+            )}
+
+            {r.type === "Duct fitting (elbow/tee/damper)" && (
+              <>
+                <Select label="Fitting type" value={r.fittingPreset} onChange={(v) => updateRow(r.id, "fittingPreset", v)} options={FITTING_K_PRESETS.map(k => ({ label: k.label }))} />
+                {FITTING_K_PRESETS.find(k => k.label === r.fittingPreset)?.K === null && (
+                  <Field label="Custom K factor" unit="—" step="0.05" value={r.customK} onChange={(v) => updateRow(r.id, "customK", v)} />
+                )}
+                <div className="grid grid-cols-2 gap-x-3">
+                  <Field label="Velocity" unit="m/s" step="0.5" value={r.velocity} onChange={(v) => updateRow(r.id, "velocity", v)} />
+                  <Field label="Gas density" unit="kg/m³" step="0.01" value={r.density} onChange={(v) => updateRow(r.id, "density", v)} />
+                </div>
+              </>
+            )}
+
+            <div className="mt-2 pt-2 border-t border-neutral-800 flex justify-between items-baseline">
+              <span className="text-[10px] text-neutral-500 uppercase tracking-wide">Component ΔP</span>
+              <span className="font-mono font-bold text-amber-400">{fmt(r.dP,0)} Pa <span className="text-neutral-500 text-xs">({fmt(r.dP/9.81,1)} mmH₂O)</span></span>
+            </div>
+          </div>
+        ))}
+        <button onClick={addRow} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">
+          + Add component
+        </button>
+      </Plate>
+
+      <Plate title="Total system resistance">
+        <Readout label="Total ΔP" value={fmt(total,0)} unit="Pa" big />
+        <Readout label="Total ΔP" value={fmt(total/9.81,1)} unit="mmH₂O" big />
+        <Readout label="Total ΔP" value={fmt(total/249.089,2)} unit="inH₂O" />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          Copy this total into the "Required system resistance" field on the Boiler tab's Draft & ID/FD fan
+          section — that calculation nets this off against the natural draft credit from your stack, then
+          sizes the fan for the remainder.
+        </div>
+      </Plate>
+
+      <div className="text-[10px] text-neutral-500 leading-relaxed px-1">
+        Furnace, boiler bank, and wet scrubber figures are manual entries (typical ranges shown as guidance) —
+        these depend heavily on the specific equipment design and should come from manufacturer data where
+        available. Multicyclone, duct friction, and fitting losses are calculated from standard velocity-head
+        and Darcy-Weisbach methods, which are reasonable engineering estimates but not a substitute for a
+        vendor's certified pressure drop curve on critical equipment.
+      </div>
+    </div>
+  );
+}
+
+// ================= FUEL CONSUMPTION HELPERS =================
+const KCAL_TO_KJ = 4.1868;
+
+// Dry-basis HHV (kcal/kg) and typical default moisture/hydrogen fractions for solid biomass.
+// Cross-checked: rice husk dry HHV ~15.8 MJ/kg (3774 kcal/kg) and woody biomass ~19-20.5 MJ/kg dry
+// against published proximate-analysis data before setting these.
+const FUEL_PRESETS = [
+  { label: "LPG (แก๊ส LPG)", kind: "liquidgas", lhv_kcal: 11000, density_kgL: 0.54 },
+  { label: "Heavy oil (น้ำมันเตา)", kind: "liquidgas", lhv_kcal: 9600, density_kgL: 0.96 },
+  { label: "Wood chips (ไม้สับ)", kind: "biomass", hhvDry_kcal: 4700, moisture: 35, hDry: 6.0 },
+  { label: "Sawdust (ขี้เลื่อย)", kind: "biomass", hhvDry_kcal: 4700, moisture: 40, hDry: 6.0 },
+  { label: "Wood wings/slabs (ปีกไม้)", kind: "biomass", hhvDry_kcal: 4700, moisture: 30, hDry: 6.0 },
+  { label: "Palm kernel shell (กะลาปาล์ม)", kind: "biomass", hhvDry_kcal: 4900, moisture: 15, hDry: 6.5 },
+  { label: "Rice husk (แกลบ)", kind: "biomass", hhvDry_kcal: 3750, moisture: 10, hDry: 5.0 },
+  { label: "Wood pellets (ขี้เลื่อยอัดเม็ด)", kind: "biomass", hhvDry_kcal: 4700, moisture: 8, hDry: 6.0 },
+  { label: "Other (อื่นๆ)", kind: "biomass", hhvDry_kcal: 4200, moisture: 25, hDry: 6.0 },
+];
+
+// LHV as-fired from dry-basis HHV, moisture fraction M (0-1), dry-basis hydrogen fraction Hdry (0-1)
+function lhvAsFiredKJkg(hhvDryKcal, Mpct, hDryPct) {
+  const HHVdry_kJ = hhvDryKcal * KCAL_TO_KJ;
+  const M = Mpct / 100, Hdry = hDryPct / 100;
+  const HHVar = HHVdry_kJ * (1 - M);
+  const waterTotal = M + 9 * Hdry * (1 - M);
+  return HHVar - 2443 * waterTotal;
+}
+
+// ================= FUEL CONSUMPTION PANEL =================
+function FuelConsumptionPanel() {
+  const [steamFlow, setSteamFlow] = useState(5000);
+  const [steamPressure, setSteamPressure] = useState(9);
+  const [pressureIsGauge, setPressureIsGauge] = useState(true);
+  const [feedwaterTemp, setFeedwaterTemp] = useState(80);
+
+  const [fuelLabel, setFuelLabel] = useState("Wood chips (ไม้สับ)");
+  const [customLhvKcal, setCustomLhvKcal] = useState(9600);
+  const [customDensity, setCustomDensity] = useState(0.96);
+  const [hhvDryKcal, setHhvDryKcal] = useState(4700);
+  const [moisturePct, setMoisturePct] = useState(35);
+  const [hDryPct, setHDryPct] = useState(6.0);
+
+  const [boilerEff, setBoilerEff] = useState(80);
+
+  const fuel = FUEL_PRESETS.find(f => f.label === fuelLabel);
+
+  // sync editable fields when fuel selection changes
+  const onSelectFuel = (label) => {
+    setFuelLabel(label);
+    const f = FUEL_PRESETS.find(x => x.label === label);
+    if (f.kind === "liquidgas") { setCustomLhvKcal(f.lhv_kcal); setCustomDensity(f.density_kgL); }
+    else { setHhvDryKcal(f.hhvDry_kcal); setMoisturePct(f.moisture); setHDryPct(f.hDry); }
+  };
+
+  const steam = useMemo(() => {
+    const pBarA = pressureIsGauge ? steamPressure + 1.01325 : steamPressure;
+    const r = steamLookupByPressure(pBarA);
+    return { hg: r.hg, T: r.T };
+  }, [steamPressure, pressureIsGauge]);
+
+  const calc = useMemo(() => {
+    const hf = feedwaterTemp * 4.186; // approx subcooled liquid enthalpy, kJ/kg
+    const dutyPerKg = steam.hg - hf; // kJ/kg steam
+    const dutyTotal_kJhr = steamFlow * dutyPerKg; // kJ/hr
+    const dutyTotal_kW = dutyTotal_kJhr / 3600;
+    const dutyTotal_kcalhr = dutyTotal_kJhr / KCAL_TO_KJ;
+
+    let lhv_kJkg, lhv_kcalkg;
+    if (fuel.kind === "liquidgas") {
+      lhv_kcalkg = customLhvKcal;
+      lhv_kJkg = customLhvKcal * KCAL_TO_KJ;
+    } else {
+      lhv_kJkg = lhvAsFiredKJkg(hhvDryKcal, moisturePct, hDryPct);
+      lhv_kcalkg = lhv_kJkg / KCAL_TO_KJ;
+    }
+
+    const fuelEnergyNeeded_kJhr = dutyTotal_kJhr / (boilerEff / 100);
+    const fuelConsumption_kgHr = fuelEnergyNeeded_kJhr / lhv_kJkg;
+
+    const literHr = fuel.kind === "liquidgas" ? fuelConsumption_kgHr / customDensity : null;
+    const tonDay = (fuelConsumption_kgHr * 24) / 1000;
+    const tonMonth = tonDay * 30;
+    const cylinders15kgDay = fuelLabel.startsWith("LPG") ? (fuelConsumption_kgHr * 24) / 15 : null;
+
+    return { hf, dutyPerKg, dutyTotal_kJhr, dutyTotal_kW, dutyTotal_kcalhr, lhv_kJkg, lhv_kcalkg,
+              fuelConsumption_kgHr, literHr, tonDay, tonMonth, cylinders15kgDay };
+  }, [steam, feedwaterTemp, steamFlow, fuel, customLhvKcal, hhvDryKcal, moisturePct, hDryPct, boilerEff, fuelLabel]);
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "Fuel", value: fmt(calc.fuelConsumption_kgHr,1), unit: "kg/hr" },
+        { label: "LHV (as-fired)", value: fmt(calc.lhv_kcalkg,0), unit: "kcal/kg" },
+        { label: "Duty", value: fmt(calc.dutyTotal_kW,0), unit: "kW" },
+      ]} />
+
+      <Plate title="Inputs">
+        <SubHeader>Steam duty</SubHeader>
+        <Field label="Steam capacity" unit="kg/hr" step="50" value={steamFlow} onChange={setSteamFlow} />
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Steam pressure" unit={pressureIsGauge ? "barg" : "bara"} step="0.1" value={steamPressure} onChange={setSteamPressure} />
+          <Field label="Feedwater temp." unit="°C" step="1" value={feedwaterTemp} onChange={setFeedwaterTemp} />
+        </div>
+        <button onClick={() => setPressureIsGauge(!pressureIsGauge)} className="text-[10px] text-sky-400 underline mb-2">
+          Switch to {pressureIsGauge ? "absolute" : "gauge"}
+        </button>
+
+        <SubHeader>Fuel type</SubHeader>
+        <Select label="Fuel" value={fuelLabel} onChange={onSelectFuel} options={FUEL_PRESETS.map(f => ({ label: f.label }))} />
+
+        {fuel.kind === "liquidgas" ? (
+          <div className="grid grid-cols-2 gap-x-3">
+            <Field label="LHV" unit="kcal/kg" step="50" value={customLhvKcal} onChange={setCustomLhvKcal} />
+            <Field label="Density" unit="kg/L" step="0.01" value={customDensity} onChange={setCustomDensity} />
+          </div>
+        ) : (
+          <>
+            <Field label="HHV, dry basis" unit="kcal/kg" step="50" value={hhvDryKcal} onChange={setHhvDryKcal} hint="Higher heating value of the bone-dry fuel — a proximate/ultimate analysis certificate gives this precisely." />
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Moisture content" unit="% as-fired" step="1" value={moisturePct} onChange={setMoisturePct} hint="This is the single biggest lever on fuel consumption — use your actual batch moisture, not a generic default." />
+              <Field label="Hydrogen, dry basis" unit="%" step="0.5" value={hDryPct} onChange={setHDryPct} hint="~5–7% typical for woody biomass." />
+            </div>
+          </>
+        )}
+
+        <SubHeader>Boiler</SubHeader>
+        <Field label="Boiler efficiency" unit="%" step="1" value={boilerEff} onChange={setBoilerEff} hint="Typical: 85–90% oil/gas, 75–83% biomass grate-fired." />
+      </Plate>
+
+      <Plate title="Steam duty">
+        <Readout label="Saturation temperature" value={fmt(steam.T,1)} unit="°C" />
+        <Readout label="hg (steam)" value={fmt(steam.hg,1)} unit="kJ/kg" />
+        <Readout label="hf (feedwater, approx.)" value={fmt(calc.hf,1)} unit="kJ/kg" />
+        <Readout label="Duty per kg steam" value={fmt(calc.dutyPerKg,1)} unit="kJ/kg" />
+        <Readout label="Total heat duty" value={fmt(calc.dutyTotal_kW,0)} unit="kW" big />
+        <Readout label="Total heat duty" value={fmt(calc.dutyTotal_kcalhr,0)} unit="kcal/hr" />
+      </Plate>
+
+      <Plate title="Fuel consumption">
+        <Readout label="LHV (as-fired)" value={fmt(calc.lhv_kcalkg,0)} unit="kcal/kg" />
+        <Readout label="LHV (as-fired)" value={fmt(calc.lhv_kJkg,0)} unit="kJ/kg" />
+        <Readout label="Fuel consumption" value={fmt(calc.fuelConsumption_kgHr,1)} unit="kg/hr" big />
+        {calc.literHr !== null && (
+          <Readout label="Fuel consumption" value={fmt(calc.literHr,1)} unit="L/hr" big />
+        )}
+        {calc.cylinders15kgDay !== null && (
+          <Readout label="Equivalent 15kg cylinders/day" value={fmt(calc.cylinders15kgDay,1)} unit="cylinders/day" />
+        )}
+        <Readout label="Daily consumption" value={fmt(calc.tonDay,2)} unit="ton/day" />
+        <Readout label="Monthly consumption (30-day)" value={fmt(calc.tonMonth,1)} unit="ton/month" />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          For solid biomass, moisture content is the dominant source of variability — a 10-point swing in
+          moisture can change fuel consumption more than any other single input. If you have a proximate/
+          ultimate analysis for the actual delivered batch, use it instead of the defaults here. This ton/day
+          figure is a good cross-check against the Silo/Hopper tab's autonomy calculation for storage sizing.
+        </div>
+      </Plate>
+    </div>
+  );
+}
+
+// ================= APP SHELL =================
+const TOOL_CATALOG = [
+  {
+    category: "Conveyor & Material Handling",
+    tools: [
+      { id: "belt", icon: "⛓️", name: "Sidewall / Cleated Belt", desc: "Motor sizing, gear ratio, sprocket selection" },
+      { id: "screw", icon: "🌀", name: "Screw Conveyor", desc: "Speed, mass flow, drive power" },
+      { id: "silo", icon: "🏗️", name: "Silo / Hopper", desc: "Volume, autonomy, flow check, reclaim screw, vibrator" },
+    ],
+  },
+  {
+    category: "Pressure Vessel",
+    tools: [
+      { id: "tank", icon: "🛢️", name: "Tank / Vessel (ASME VIII)", desc: "Volume, thickness, MAWP, printable datasheet" },
+    ],
+  },
+  {
+    category: "Boiler Engineering",
+    tools: [
+      { id: "boiler", icon: "🔥", name: "Combustion, Steam & Draft", desc: "Flue gas, steam table, ID/FD fan sizing" },
+      { id: "fuelconsumption", icon: "⛽", name: "Fuel Consumption", desc: "LPG, heavy oil, or biomass fuel rate from steam duty" },
+      { id: "pressuredrop", icon: "📉", name: "System Pressure Drop", desc: "Furnace → boiler → multicyclone → scrubber → duct → stack" },
+      { id: "refractory", icon: "🧱", name: "Refractory Lining", desc: "Brick + mortar or castable quantities by area" },
+      { id: "insulation", icon: "🧊", name: "Insulation Selection", desc: "Glass/rock wool thickness vs surface temp & density" },
+    ],
+  },
+  {
+    category: "Reference / Materials",
+    tools: [
+      { id: "steel", icon: "📐", name: "Steel Properties", desc: "Pipe schedule dimensions, plate/channel/beam weights" },
+      { id: "unitconv", icon: "🔁", name: "Unit Converter", desc: "Pressure, flow, power, length, mass, temperature" },
+      { id: "bolttorque", icon: "🔩", name: "Bolt Torque", desc: "Recommended torque from bolt size, class & friction" },
+    ],
+  },
+  {
+    category: "Electrical & Instrumentation",
+    tools: [
+      { id: "motorcable", icon: "⚡", name: "Motor FLA & Cable Sizing", desc: "Full load current + voltage-drop cable check" },
+      { id: "signalscale", icon: "📶", name: "4–20mA / PLC Scaling", desc: "Convert between mA, PLC counts & engineering units" },
+    ],
+  },
+];
+
+function ToolIcon({ id, className }) {
+  const p = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round", className };
+  switch (id) {
+    case "belt": return (
+      <svg {...p}>
+        <rect x="3" y="9" width="18" height="6" rx="3" />
+        <circle cx="8" cy="12" r="1.1" fill="currentColor" stroke="none" />
+        <circle cx="16" cy="12" r="1.1" fill="currentColor" stroke="none" />
+      </svg>
+    );
+    case "screw": return (
+      <svg {...p}>
+        <rect x="7" y="3" width="10" height="18" rx="5" />
+        <path d="M7 6 L17 10 M7 12 L17 16 M7 18 L17 21" />
+      </svg>
+    );
+    case "silo": return (
+      <svg {...p}>
+        <path d="M5 4 H19 V10 L15 20 H9 L5 10 Z" />
+      </svg>
+    );
+    case "tank": return (
+      <svg {...p}>
+        <rect x="2" y="8" width="20" height="8" rx="4" />
+        <line x1="7.5" y1="8" x2="7.5" y2="16" />
+        <line x1="16.5" y1="8" x2="16.5" y2="16" />
+      </svg>
+    );
+    case "boiler": return (
+      <svg {...p}>
+        <path d="M12 2 C7 7 6 11 8 15 C9 17.5 12 19 12 19 C12 19 15 17.5 16 15 C18 11 17 7 12 2 Z" />
+      </svg>
+    );
+    case "fuelconsumption": return (
+      <svg {...p}>
+        <path d="M6 3 H14 V21 H6 Z" />
+        <path d="M14 8 L17 10 V17 A2 2 0 0 0 21 17 V10 L18.5 7.5" />
+        <line x1="6" y1="8" x2="14" y2="8" />
+      </svg>
+    );
+    case "pressuredrop": return (
+      <svg {...p}>
+        <circle cx="12" cy="14" r="7" />
+        <line x1="12" y1="14" x2="15" y2="10" />
+        <line x1="12" y1="3" x2="12" y2="5" />
+      </svg>
+    );
+    case "refractory": return (
+      <svg {...p}>
+        <rect x="3" y="4" width="18" height="16" />
+        <line x1="3" y1="9" x2="21" y2="9" />
+        <line x1="3" y1="14" x2="21" y2="14" />
+        <line x1="3" y1="19" x2="21" y2="19" />
+        <line x1="9" y1="4" x2="9" y2="9" />
+        <line x1="15" y1="9" x2="15" y2="14" />
+        <line x1="9" y1="14" x2="9" y2="19" />
+      </svg>
+    );
+    case "insulation": return (
+      <svg {...p}>
+        <path d="M12 3 L21 8 L12 13 L3 8 Z" />
+        <path d="M3 13 L12 18 L21 13" />
+        <path d="M3 17 L12 22 L21 17" />
+      </svg>
+    );
+    case "steel": return (
+      <svg {...p}>
+        <line x1="4" y1="4" x2="20" y2="4" />
+        <line x1="4" y1="20" x2="20" y2="20" />
+        <line x1="12" y1="4" x2="12" y2="20" />
+      </svg>
+    );
+    case "unitconv": return (
+      <svg {...p}>
+        <path d="M4 8 H18 M14 4 L18 8 L14 12" />
+        <path d="M20 16 H6 M10 12 L6 16 L10 20" />
+      </svg>
+    );
+    case "bolttorque": return (
+      <svg {...p}>
+        <path d="M12 3 L19 7 V15 L12 19 L5 15 V7 Z" />
+        <circle cx="12" cy="11" r="2.4" />
+      </svg>
+    );
+    case "motorcable": return (
+      <svg {...p}>
+        <circle cx="10" cy="12" r="6" />
+        <line x1="16" y1="10" x2="21" y2="10" />
+        <line x1="16" y1="14" x2="21" y2="14" />
+      </svg>
+    );
+    case "signalscale": return (
+      <svg {...p}>
+        <path d="M2 12 H6 L9 5 L13 19 L16 12 H22" />
+      </svg>
+    );
+    default: return (
+      <svg {...p}><circle cx="12" cy="12" r="8" /></svg>
+    );
+  }
+}
+
+const CATEGORY_COLORS = {
+  "Conveyor & Material Handling": "text-sky-400 group-hover:border-sky-500",
+  "Pressure Vessel": "text-violet-400 group-hover:border-violet-500",
+  "Boiler Engineering": "text-orange-400 group-hover:border-orange-500",
+  "Reference / Materials": "text-teal-400 group-hover:border-teal-500",
+  "Electrical & Instrumentation": "text-amber-400 group-hover:border-amber-500",
+};
+
+function ToolboxHome({ onSelect }) {
+  return (
+    <div>
+      <div className="mb-4 text-center">
+        <h1 className="text-base font-bold text-neutral-50 tracking-tight">Engineering Toolbox</h1>
+      </div>
+      <div className="space-y-5">
+        {TOOL_CATALOG.map((group) => (
+          <div key={group.category}>
+            <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold mb-2 text-center">{group.category}</div>
+            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-3 justify-items-center">
+              {group.tools.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => onSelect(t.id)}
+                  title={t.desc}
+                  className="group flex flex-col items-center gap-1"
+                >
+                  <div className={`w-14 h-14 rounded-2xl bg-neutral-900 border border-neutral-700 flex items-center justify-center transition-all group-hover:scale-105 group-active:scale-95 ${CATEGORY_COLORS[group.category]}`}>
+                    <ToolIcon id={t.id} className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] text-neutral-400 text-center leading-tight w-16">{t.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="text-[9px] text-neutral-600 mt-4 text-center leading-snug">
+        Preliminary sizing tools — confirm against manufacturer data and applicable codes before finalizing.
+      </div>
+    </div>
+  );
+}
+
+function ConveyorSizingCalculator() {
+  const [tab, setTab] = useState(null); // null = home screen
+  const [sharedCapacityTPH, setSharedCapacityTPH] = useState(20);
+
+  const currentTool = TOOL_CATALOG.flatMap((g) => g.tools).find((t) => t.id === tab);
+
+  return (
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4 md:p-6">
+      <div className="max-w-5xl mx-auto">
+        {tab === null ? (
+          <ToolboxHome onSelect={setTab} />
+        ) : (
+          <>
+            <div className="flex items-center gap-3 mb-5 border-b border-neutral-800 pb-4">
+              <button
+                onClick={() => setTab(null)}
+                className="px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500 hover:text-amber-400 shrink-0"
+              >
+                ← Toolbox
+              </button>
+              <div className="min-w-0">
+                <div className="text-[10px] uppercase tracking-[0.15em] text-neutral-500 font-semibold truncate">
+                  {TOOL_CATALOG.find((g) => g.tools.some((t) => t.id === tab))?.category}
+                </div>
+                <h1 className="text-lg font-bold text-neutral-50 tracking-tight truncate">{currentTool?.name}</h1>
+              </div>
+            </div>
+
+            {tab === "belt" ? (
+              <BeltConveyorPanel capacityTPH={sharedCapacityTPH} setCapacityTPH={setSharedCapacityTPH} />
+            ) : tab === "screw" ? (
+              <ScrewConveyorPanel beltCapacityTPH={sharedCapacityTPH} />
+            ) : tab === "silo" ? (
+              <SiloHopperPanel />
+            ) : tab === "tank" ? (
+              <TankVesselPanel />
+            ) : tab === "boiler" ? (
+              <BoilerPanel />
+            ) : tab === "fuelconsumption" ? (
+              <FuelConsumptionPanel />
+            ) : tab === "pressuredrop" ? (
+              <SystemPressureDropPanel />
+            ) : tab === "refractory" ? (
+              <RefractoryPanel />
+            ) : tab === "insulation" ? (
+              <InsulationPanel />
+            ) : tab === "steel" ? (
+              <SteelPropertiesPanel />
+            ) : tab === "unitconv" ? (
+              <UnitConverterPanel />
+            ) : tab === "bolttorque" ? (
+              <BoltTorquePanel />
+            ) : tab === "motorcable" ? (
+              <MotorCablePanel />
+            ) : (
+              <SignalScalingPanel />
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(React.createElement(ConveyorSizingCalculator));
+</script>
+</body>
+</html>

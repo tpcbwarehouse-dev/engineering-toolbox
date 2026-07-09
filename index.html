@@ -1251,10 +1251,13 @@ function TankVesselPanel() {
   return (
     <div>
       <style>{`
+        @page { size: A4; margin: 12mm; }
         @media print {
           .no-print { display: none !important; }
           .print-sheet { display: block !important; }
           body { background: white; }
+          .print-sheet table { page-break-inside: avoid; }
+          .print-sheet .print-section { page-break-inside: avoid; }
         }
         .print-sheet { display: none; }
       `}</style>
@@ -2866,13 +2869,13 @@ const KCAL_TO_KJ = 4.1868;
 const FUEL_PRESETS = [
   { label: "LPG (แก๊ส LPG)", kind: "liquidgas", lhv_kcal: 11000, density_kgL: 0.54 },
   { label: "Heavy oil (น้ำมันเตา)", kind: "liquidgas", lhv_kcal: 9600, density_kgL: 0.96 },
-  { label: "Wood chips (ไม้สับ)", kind: "biomass", hhvDry_kcal: 4700, moisture: 35, hDry: 6.0 },
-  { label: "Sawdust (ขี้เลื่อย)", kind: "biomass", hhvDry_kcal: 4700, moisture: 40, hDry: 6.0 },
-  { label: "Wood wings/slabs (ปีกไม้)", kind: "biomass", hhvDry_kcal: 4700, moisture: 30, hDry: 6.0 },
-  { label: "Palm kernel shell (กะลาปาล์ม)", kind: "biomass", hhvDry_kcal: 4900, moisture: 15, hDry: 6.5 },
-  { label: "Rice husk (แกลบ)", kind: "biomass", hhvDry_kcal: 3750, moisture: 10, hDry: 5.0 },
-  { label: "Wood pellets (ขี้เลื่อยอัดเม็ด)", kind: "biomass", hhvDry_kcal: 4700, moisture: 8, hDry: 6.0 },
-  { label: "Other (อื่นๆ)", kind: "biomass", hhvDry_kcal: 4200, moisture: 25, hDry: 6.0 },
+  { label: "Wood chips (ไม้สับ)", kind: "biomass", hhvDry_kcal: 4700, moisture: 35, hDry: 6.0, bulkDensity: 280 },
+  { label: "Sawdust (ขี้เลื่อย)", kind: "biomass", hhvDry_kcal: 4700, moisture: 40, hDry: 6.0, bulkDensity: 220 },
+  { label: "Wood wings/slabs (ปีกไม้)", kind: "biomass", hhvDry_kcal: 4700, moisture: 30, hDry: 6.0, bulkDensity: 250 },
+  { label: "Palm kernel shell (กะลาปาล์ม)", kind: "biomass", hhvDry_kcal: 4900, moisture: 15, hDry: 6.5, bulkDensity: 620 },
+  { label: "Rice husk (แกลบ)", kind: "biomass", hhvDry_kcal: 3750, moisture: 10, hDry: 5.0, bulkDensity: 120 },
+  { label: "Wood pellets (ขี้เลื่อยอัดเม็ด)", kind: "biomass", hhvDry_kcal: 4700, moisture: 8, hDry: 6.0, bulkDensity: 620 },
+  { label: "Other (อื่นๆ)", kind: "biomass", hhvDry_kcal: 4200, moisture: 25, hDry: 6.0, bulkDensity: 300 },
 ];
 
 // LHV as-fired from dry-basis HHV, moisture fraction M (0-1), dry-basis hydrogen fraction Hdry (0-1)
@@ -3017,6 +3020,1885 @@ function FuelConsumptionPanel() {
   );
 }
 
+// ================= WATER TREATMENT HELPERS =================
+const WT_MATERIALS = ["FRP (Fiberglass)", "Carbon steel, rubber lined", "Carbon steel, epoxy coated", "SS304", "SS316"];
+const WT_PIPE_MATERIALS = ["uPVC", "CPVC", "SS304", "Mild steel, galvanized", "Mild steel, black"];
+const WT_HEAD_TYPES = ["Dished (2:1 ellipsoidal)", "Flat"];
+
+function suggestPipeSizeMm(flow_m3hr, velocity_ms) {
+  const flow_m3s = flow_m3hr / 3600;
+  const area_m2 = flow_m3s / velocity_ms;
+  return Math.sqrt((4 * area_m2) / Math.PI) * 1000;
+}
+
+// ================= ROUGH VESSEL DRAWING (vertical elevation) =================
+function WaterTankDrawing({ diameter_mm, freeboard_mm, layers, headType, filterType }) {
+  const margin = 34;
+  const px = 180 / Math.max(diameter_mm, freeboard_mm + layers.reduce((s, l) => s + l.depth, 0));
+  const dim = (v) => v * px;
+
+  const D = dim(diameter_mm);
+  const headDepth = headType === "Flat" ? 6 : D * 0.22;
+  const stackHeights = [freeboard_mm, ...layers.map(l => l.depth)];
+  const totalStack = stackHeights.reduce((a, b) => a + b, 0);
+  const stackPx = dim(totalStack);
+
+  const svgW = D + margin * 2 + 70;
+  const svgH = stackPx + headDepth * 2 + margin * 2 + 20;
+
+  const left = margin + 60, right = left + D;
+  let y = margin + headDepth;
+  const bands = [{ label: "Freeboard / water", depth: freeboard_mm, fill: "#2b4a63" }, ...layers.map(l => ({ label: l.label, depth: l.depth, fill: l.fill }))];
+
+  const bandRects = [];
+  for (const b of bands) {
+    const h = dim(b.depth);
+    bandRects.push({ ...b, y, h });
+    y += h;
+  }
+  const shellBottom = y;
+
+  return (
+    <div className="bg-neutral-950 border border-neutral-800 rounded p-2">
+      <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full h-auto">
+        <path d={`M ${left} ${margin + headDepth} Q ${left + D / 2} ${margin - headDepth * 0.4} ${right} ${margin + headDepth}`} fill="#2a2d33" stroke="#8b9098" strokeWidth="1.5" />
+        {bandRects.map((b, i) => (
+          <rect key={i} x={left} y={b.y} width={D} height={b.h} fill={b.fill} stroke="#8b9098" strokeWidth="0.75" />
+        ))}
+        <path d={`M ${left} ${shellBottom} Q ${left + D / 2} ${shellBottom + headDepth * 1.6} ${right} ${shellBottom}`} fill="#2a2d33" stroke="#8b9098" strokeWidth="1.5" />
+        <line x1={left} y1={margin + headDepth} x2={left} y2={shellBottom} stroke="#8b9098" strokeWidth="1.5" />
+        <line x1={right} y1={margin + headDepth} x2={right} y2={shellBottom} stroke="#8b9098" strokeWidth="1.5" />
+
+        {bandRects.map((b, i) => (
+          <text key={i} x={right + 8} y={b.y + b.h / 2 + 3} fontSize="8.5" fill="#9aa0a8" fontFamily="monospace">
+            {b.label} ({fmt(b.depth,0)}mm)
+          </text>
+        ))}
+
+        <line x1={left} y1={margin - headDepth * 0.4 - 8} x2={right} y2={margin - headDepth * 0.4 - 8} stroke="#5b616b" />
+        <text x={left + D / 2} y={margin - headDepth * 0.4 - 12} fontSize="9" fill="#9aa0a8" fontFamily="monospace" textAnchor="middle">⌀{fmt(diameter_mm,0)}mm</text>
+
+        <line x1={left - 10} y1={margin + headDepth + 4} x2={left} y2={margin + headDepth + 4} stroke="#e8a33d" strokeWidth="2" />
+        <text x={left - 12} y={margin + headDepth + 2} fontSize="7.5" fill="#e8a33d" fontFamily="monospace" textAnchor="end">Inlet</text>
+        <line x1={left - 10} y1={shellBottom - 4} x2={left} y2={shellBottom - 4} stroke="#5B8FA8" strokeWidth="2" />
+        <text x={left - 12} y={shellBottom - 6} fontSize="7.5" fill="#5B8FA8" fontFamily="monospace" textAnchor="end">Outlet</text>
+      </svg>
+      <div className="text-[9px] text-neutral-500 mt-1 text-center">
+        Schematic elevation — {filterType}, {headType.toLowerCase()} heads. Not a fabrication drawing.
+      </div>
+    </div>
+  );
+}
+
+// ================= WATER TREATMENT PANEL =================
+function WaterTreatmentPanel() {
+  const [filterType, setFilterType] = useState("sand");
+
+  const [tag, setTag] = useState("V-101");
+  const [service, setService] = useState("Sand Filter");
+  const [docNo, setDocNo] = useState("");
+
+  const [flow, setFlow] = useState(10);
+
+  const [sandRate, setSandRate] = useState(12);
+  const [sandBedDepth, setSandBedDepth] = useState(600);
+  const [sandFreeboardPct, setSandFreeboardPct] = useState(50);
+
+  const [carbonMode, setCarbonMode] = useState("ebct");
+  const [ebctMin, setEbctMin] = useState(10);
+  const [carbonVelocity, setCarbonVelocity] = useState(15);
+  const [carbonBedDepth, setCarbonBedDepth] = useState(1000);
+  const [carbonFreeboardPct, setCarbonFreeboardPct] = useState(50);
+
+  const [hardness, setHardness] = useState(200);
+  const [serviceRunHr, setServiceRunHr] = useState(16);
+  const [resinCapacity, setResinCapacity] = useState(1.6);
+  const [resinBedDepth, setResinBedDepth] = useState(1000);
+  const [resinFreeboardPct, setResinFreeboardPct] = useState(75);
+  const [saltDose, setSaltDose] = useState(150);
+  const [regensToStore, setRegensToStore] = useState(3);
+
+  const [primaryBrand, setPrimaryBrand] = useState("");
+  const [primaryModel, setPrimaryModel] = useState("");
+
+  function defaultExtraLayers(type) {
+    if (type === "sand") return [{ id: Math.random().toString(36).slice(2), label: "Support gravel", brand: "", model: "", mode: "depth", value: 200 }];
+    if (type === "carbon") return [{ id: Math.random().toString(36).slice(2), label: "Support gravel", brand: "", model: "", mode: "depth", value: 150 }];
+    return [{ id: Math.random().toString(36).slice(2), label: "Support gravel", brand: "", model: "", mode: "depth", value: 150 }];
+  }
+  const [mediaLayers, setMediaLayers] = useState(defaultExtraLayers("sand"));
+  const addMediaLayer = () => setMediaLayers([...mediaLayers, { id: Math.random().toString(36).slice(2), label: "", brand: "", model: "", mode: "depth", value: 100 }]);
+  const removeMediaLayer = (id) => setMediaLayers(mediaLayers.filter(l => l.id !== id));
+  const updateMediaLayer = (id, field, val) => setMediaLayers(mediaLayers.map(l => (l.id === id ? { ...l, [field]: val } : l)));
+
+  const [material, setMaterial] = useState("FRP (Fiberglass)");
+  const [headType, setHeadType] = useState("Dished (2:1 ellipsoidal)");
+  const [designPressureBar, setDesignPressureBar] = useState(6.9);
+  const [underdrainSpace, setUnderdrainSpace] = useState(150);
+  const [legHeight, setLegHeight] = useState(300);
+
+  const [pipeVelocity, setPipeVelocity] = useState(1.5);
+  const [pipeMaterial, setPipeMaterial] = useState("uPVC");
+  const [valveType, setValveType] = useState("Manual multiport valve");
+
+  const [components, setComponents] = useState([
+    { description: "Pressure gauge, inlet", qty: "1", notes: "0-10 bar, glycerin filled" },
+    { description: "Pressure gauge, outlet", qty: "1", notes: "0-10 bar, glycerin filled" },
+    { description: "Sample cock", qty: "2", notes: "Inlet & outlet" },
+  ]);
+  const addComponent = () => setComponents([...components, { description: "", qty: "", notes: "" }]);
+  const removeComponent = (i) => setComponents(components.filter((_, idx) => idx !== i));
+  const updateComponent = (i, field, val) => setComponents(components.map((c, idx) => (idx === i ? { ...c, [field]: val } : c)));
+
+  const process = useMemo(() => {
+    if (filterType === "sand") {
+      const area = flow / sandRate;
+      const diameter = Math.sqrt((4 * area) / Math.PI);
+      const freeboard = sandBedDepth * (sandFreeboardPct / 100);
+      return {
+        area, diameter_m: diameter, diameter_mm: diameter * 1000,
+        primaryLabel: "Sand media", primaryDepth: sandBedDepth,
+        freeboard_mm: freeboard,
+        velocity: sandRate,
+      };
+    }
+    if (filterType === "carbon") {
+      let area, diameter, bedVolume;
+      if (carbonMode === "ebct") {
+        bedVolume = flow * (ebctMin / 60);
+        area = bedVolume / (carbonBedDepth / 1000);
+      } else {
+        area = flow / carbonVelocity;
+        bedVolume = area * (carbonBedDepth / 1000);
+      }
+      diameter = Math.sqrt((4 * area) / Math.PI);
+      const freeboard = carbonBedDepth * (carbonFreeboardPct / 100);
+      const actualEbct = (bedVolume / flow) * 60;
+      const actualVelocity = flow / area;
+      return {
+        area, diameter_m: diameter, diameter_mm: diameter * 1000, bedVolume, actualEbct, actualVelocity,
+        primaryLabel: "Activated carbon", primaryDepth: carbonBedDepth,
+        freeboard_mm: freeboard,
+      };
+    }
+    const totalWater_L = flow * serviceRunHr * 1000;
+    const hardnessLoad_eq = (totalWater_L * hardness) / 50000;
+    const resinVolume_L = hardnessLoad_eq / resinCapacity;
+    const resinVolume_m3 = resinVolume_L / 1000;
+    const area = resinVolume_m3 / (resinBedDepth / 1000);
+    const diameter = Math.sqrt((4 * area) / Math.PI);
+    const freeboard = resinBedDepth * (resinFreeboardPct / 100);
+    const velocity = flow / area;
+    const saltPerRegen_kg = (resinVolume_L * saltDose) / 1000;
+    const regensPerWeek = (24 * 7) / serviceRunHr;
+    const brineSaltStorage_kg = saltPerRegen_kg * regensToStore;
+    const brineTankVolume_L = (brineSaltStorage_kg / 1100) * 1000;
+    return {
+      area, diameter_m: diameter, diameter_mm: diameter * 1000, resinVolume_L, velocity,
+      primaryLabel: "Cation resin", primaryDepth: resinBedDepth,
+      freeboard_mm: freeboard,
+      saltPerRegen_kg, regensPerWeek, brineSaltStorage_kg, brineTankVolume_L,
+    };
+  }, [filterType, flow, sandRate, sandBedDepth, sandFreeboardPct,
+      carbonMode, ebctMin, carbonVelocity, carbonBedDepth, carbonFreeboardPct,
+      hardness, serviceRunHr, resinCapacity, resinBedDepth, resinFreeboardPct, saltDose, regensToStore]);
+
+  // Unified layer stack: primary media (depth fixed by process sizing) + user's free-form additional layers.
+  // volume(L) = area(m2) x depth(mm) -- a convenient identity (1 m2 x 1mm = 1 liter).
+  const LAYER_PALETTE = ["#8a6d3b", "#5a5347", "#c47a3d", "#2b2b2b", "#4a6b5a", "#6b4a6b", "#6b5a4a"];
+  const allLayers = useMemo(() => {
+    const primary = {
+      id: "primary", label: process.primaryLabel, brand: primaryBrand, model: primaryModel,
+      depth_mm: process.primaryDepth, volume_L: process.area * process.primaryDepth, isPrimary: true,
+    };
+    const extras = mediaLayers.map((l) => {
+      const depth_mm = l.mode === "depth" ? l.value : l.value / process.area;
+      const volume_L = l.mode === "volume" ? l.value : process.area * l.value;
+      return { ...l, depth_mm, volume_L };
+    });
+    return [primary, ...extras].map((l, i) => ({ ...l, fill: LAYER_PALETTE[i % LAYER_PALETTE.length] }));
+  }, [process, primaryBrand, primaryModel, mediaLayers]);
+
+  const mechanical = useMemo(() => {
+    const D_mm = process.diameter_mm;
+    const straightHeight_mm = process.freeboard_mm + allLayers.reduce((s, l) => s + l.depth_mm, 0) + underdrainSpace;
+    const headDepth_mm = headType === "Flat" ? 0 : D_mm / 4;
+    const overallHeight_mm = straightHeight_mm + 2 * headDepth_mm + legHeight;
+    const pipeSize_mm = suggestPipeSizeMm(flow, pipeVelocity);
+    return { straightHeight_mm, headDepth_mm, overallHeight_mm, pipeSize_mm };
+  }, [process, allLayers, underdrainSpace, headType, legHeight, flow, pipeVelocity]);
+
+  const filterLabel = filterType === "sand" ? "Sand Filter" : filterType === "carbon" ? "Carbon Filter" : "Resin Softener";
+
+  return (
+    <div>
+      <style>{`
+        @page { size: A4; margin: 12mm; }
+        @media print {
+          .no-print { display: none !important; }
+          .print-sheet { display: block !important; }
+          body { background: white; }
+          .print-sheet table { page-break-inside: avoid; }
+          .print-sheet .print-section { page-break-inside: avoid; }
+        }
+        .print-sheet { display: none; }
+      `}</style>
+
+      <div className="no-print flex justify-end mb-3">
+        <button onClick={() => window.print()} className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wide bg-emerald-600 text-white hover:bg-emerald-500">
+          🖨 Print / Save as PDF
+        </button>
+      </div>
+
+      <div className="no-print">
+        <StickyResults items={[
+          { label: "Vessel ⌀", value: fmt(process.diameter_mm,0), unit: "mm" },
+          { label: "Overall height", value: fmt(mechanical.overallHeight_mm,0), unit: "mm" },
+          { label: "Primary media", value: fmt(allLayers[0].volume_L,0), unit: "L" },
+        ]} />
+
+        <Plate title="Filter type">
+          <div className="grid grid-cols-3 gap-2">
+            <button onClick={() => { setFilterType("sand"); setService("Sand Filter"); setMediaLayers(defaultExtraLayers("sand")); }} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${filterType === "sand" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Sand</button>
+            <button onClick={() => { setFilterType("carbon"); setService("Carbon Filter"); setMediaLayers(defaultExtraLayers("carbon")); }} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${filterType === "carbon" ? "bg-neutral-500 text-neutral-950 border-neutral-400" : "border-neutral-700 text-neutral-300"}`}>Carbon</button>
+            <button onClick={() => { setFilterType("softener"); setService("Resin Softener"); setMediaLayers(defaultExtraLayers("softener")); }} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${filterType === "softener" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Softener</button>
+          </div>
+        </Plate>
+
+        <Plate title="Inputs">
+          <SubHeader>Identification</SubHeader>
+          <div className="grid grid-cols-2 gap-x-3">
+            <TextField label="Tag" value={tag} onChange={setTag} />
+            <TextField label="Document no." value={docNo} onChange={setDocNo} />
+          </div>
+          <TextField label="Service" value={service} onChange={setService} />
+
+          <SubHeader>Process — {filterLabel}</SubHeader>
+          <Field label="Design flow rate" unit="m³/hr" step="0.5" value={flow} onChange={setFlow} />
+
+          {filterType === "sand" && (
+            <>
+              <Field label="Filtration rate" unit="m/hr" step="0.5" value={sandRate} onChange={setSandRate} hint="Typical 10–15 m/hr for pressure sand filters." />
+              <Field label="Sand bed depth" unit="mm" step="10" value={sandBedDepth} onChange={setSandBedDepth} hint="Typical 600–900mm. This depth (with the vessel area) determines vessel diameter." />
+              <Field label="Freeboard" unit="% of bed depth" step="5" value={sandFreeboardPct} onChange={setSandFreeboardPct} hint="Space for backwash bed expansion — 50% typical." />
+              <div className="grid grid-cols-2 gap-x-3">
+                <TextField label="Sand media brand" value={primaryBrand} onChange={setPrimaryBrand} placeholder="e.g. local silica sand supplier" />
+                <TextField label="Sand media model/grade" value={primaryModel} onChange={setPrimaryModel} placeholder="e.g. 0.5-1.0mm effective size" />
+              </div>
+            </>
+          )}
+
+          {filterType === "carbon" && (
+            <>
+              <div className="flex gap-2 mb-3">
+                <button onClick={() => setCarbonMode("ebct")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${carbonMode === "ebct" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>By EBCT</button>
+                <button onClick={() => setCarbonMode("velocity")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${carbonMode === "velocity" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>By velocity</button>
+              </div>
+              {carbonMode === "ebct" ? (
+                <Field label="Empty bed contact time (EBCT)" unit="min" step="0.5" value={ebctMin} onChange={setEbctMin} hint="5–10 min for dechlorination, 10–20 min for organics removal." />
+              ) : (
+                <Field label="Linear velocity" unit="m/hr" step="0.5" value={carbonVelocity} onChange={setCarbonVelocity} hint="Typical 10–20 m/hr." />
+              )}
+              <Field label="Carbon bed depth" unit="mm" step="10" value={carbonBedDepth} onChange={setCarbonBedDepth} hint="Typical 750–1500mm. In EBCT mode, this depth (with area) also sets vessel diameter." />
+              <Field label="Freeboard" unit="% of bed depth" step="5" value={carbonFreeboardPct} onChange={setCarbonFreeboardPct} hint="GAC expands 30–50% during backwash." />
+              <div className="grid grid-cols-2 gap-x-3">
+                <TextField label="Carbon brand" value={primaryBrand} onChange={setPrimaryBrand} placeholder="e.g. Calgon, Jacobi" />
+                <TextField label="Carbon model/grade" value={primaryModel} onChange={setPrimaryModel} placeholder="e.g. 8x30 mesh coal-based GAC" />
+              </div>
+            </>
+          )}
+
+          {filterType === "softener" && (
+            <>
+              <div className="grid grid-cols-2 gap-x-3">
+                <Field label="Raw water hardness" unit="mg/L as CaCO₃" step="10" value={hardness} onChange={setHardness} />
+                <Field label="Desired service run" unit="hours" step="1" value={serviceRunHr} onChange={setServiceRunHr} hint="Time between regenerations." />
+              </div>
+              <div className="grid grid-cols-2 gap-x-3">
+                <Field label="Resin operating capacity" unit="eq/L" step="0.05" value={resinCapacity} onChange={setResinCapacity} hint="~1.0–1.3 low salt dose, ~1.6–2.0 high salt dose." />
+                <Field label="Resin bed depth" unit="mm" step="10" value={resinBedDepth} onChange={setResinBedDepth} hint="Typical 750–1500mm. This depth sets vessel diameter here." />
+              </div>
+              <Field label="Freeboard" unit="% of bed depth" step="5" value={resinFreeboardPct} onChange={setResinFreeboardPct} hint="Resin expands 50–100% during backwash." />
+              <div className="grid grid-cols-2 gap-x-3">
+                <Field label="Salt dose" unit="g NaCl/L resin" step="10" value={saltDose} onChange={setSaltDose} hint="120g/L (low, ~1.0-1.3eq/L) to 250g/L (high, ~1.7-2.0eq/L)." />
+                <Field label="Regenerations to store in brine tank" unit="—" step="1" value={regensToStore} onChange={setRegensToStore} />
+              </div>
+              <div className="grid grid-cols-2 gap-x-3">
+                <TextField label="Resin brand" value={primaryBrand} onChange={setPrimaryBrand} placeholder="e.g. Purolite, Dow, Lanxess" />
+                <TextField label="Resin model" value={primaryModel} onChange={setPrimaryModel} placeholder="e.g. C100E strong acid cation" />
+              </div>
+            </>
+          )}
+
+          <SubHeader>Additional media layers (BOQ)</SubHeader>
+          <div className="text-[10px] text-neutral-500 mb-2 leading-relaxed">
+            The primary media depth above sets the vessel diameter. Layers here (support gravel, extra media,
+            multi-bed stacks) sit below it and don't affect sizing — enter brand/model and either a depth or a
+            volume for each; the other is computed automatically from the vessel's known cross-section.
+          </div>
+          {mediaLayers.map((l) => (
+            <div key={l.id} className="border border-neutral-800 rounded p-2 mb-2 relative">
+              <button onClick={() => removeMediaLayer(l.id)} className="absolute top-1 right-1 text-neutral-500 hover:text-red-400 text-xs px-1">✕</button>
+              <TextField label="Layer name" value={l.label} onChange={(v) => updateMediaLayer(l.id, "label", v)} placeholder="e.g. Support gravel, Anthracite cap, Garnet" />
+              <div className="grid grid-cols-2 gap-x-2">
+                <TextField label="Brand" value={l.brand} onChange={(v) => updateMediaLayer(l.id, "brand", v)} />
+                <TextField label="Model/grade" value={l.model} onChange={(v) => updateMediaLayer(l.id, "model", v)} />
+              </div>
+              <div className="flex gap-2 mb-2">
+                <button onClick={() => updateMediaLayer(l.id, "mode", "depth")} className={`flex-1 py-1.5 rounded text-[10px] font-semibold uppercase tracking-wide border ${l.mode === "depth" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>By depth</button>
+                <button onClick={() => updateMediaLayer(l.id, "mode", "volume")} className={`flex-1 py-1.5 rounded text-[10px] font-semibold uppercase tracking-wide border ${l.mode === "volume" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>By volume</button>
+              </div>
+              <Field label={l.mode === "depth" ? "Depth" : "Volume"} unit={l.mode === "depth" ? "mm" : "L"} step={l.mode === "depth" ? "10" : "5"} value={l.value} onChange={(v) => updateMediaLayer(l.id, "value", v)} />
+            </div>
+          ))}
+          <button onClick={addMediaLayer} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">
+            + Add media layer
+          </button>
+
+          <SubHeader>Mechanical</SubHeader>
+          <Select label="Tank material" value={material} onChange={setMaterial} options={WT_MATERIALS.map(m => ({ label: m }))} />
+          <Select label="Head type" value={headType} onChange={setHeadType} options={WT_HEAD_TYPES.map(h => ({ label: h }))} />
+          <div className="grid grid-cols-2 gap-x-3">
+            <Field label="Design pressure" unit="barg" step="0.1" value={designPressureBar} onChange={setDesignPressureBar} hint="100psi (6.9 barg) is a common standard FRP/carbon steel filter vessel rating." />
+            <Field label="Underdrain/distributor space" unit="mm" step="10" value={underdrainSpace} onChange={setUnderdrainSpace} />
+          </div>
+          <Field label="Leg/support height" unit="mm" step="10" value={legHeight} onChange={setLegHeight} />
+          <div className="text-[10px] text-neutral-500 mt-1 leading-relaxed">
+            For a full ASME Section VIII pressure/thickness calculation on this vessel, use the Tank/Vessel tab —
+            this tool focuses on process (media) sizing, not vessel wall thickness.
+          </div>
+
+          <SubHeader>Piping & valves</SubHeader>
+          <div className="grid grid-cols-2 gap-x-3">
+            <Field label="Design velocity" unit="m/s" step="0.1" value={pipeVelocity} onChange={setPipeVelocity} hint="1–2 m/s typical for water service." />
+            <Select label="Pipe material" value={pipeMaterial} onChange={setPipeMaterial} options={WT_PIPE_MATERIALS.map(m => ({ label: m }))} />
+          </div>
+          <Select label="Valve type" value={valveType} onChange={setValveType} options={[{label:"Manual multiport valve"},{label:"Automatic/electrical control valve"},{label:"Individual manual valves (multi-valve nest)"}]} />
+
+          <SubHeader>Additional components</SubHeader>
+          {components.map((c, i) => (
+            <div key={i} className="border border-neutral-800 rounded p-2 mb-2 relative">
+              <button onClick={() => removeComponent(i)} className="absolute top-1 right-1 text-neutral-500 hover:text-red-400 text-xs px-1">✕</button>
+              <TextField label="Description" value={c.description} onChange={(v) => updateComponent(i, "description", v)} />
+              <div className="grid grid-cols-2 gap-x-2">
+                <TextField label="Qty" value={c.qty} onChange={(v) => updateComponent(i, "qty", v)} />
+                <TextField label="Notes" value={c.notes} onChange={(v) => updateComponent(i, "notes", v)} />
+              </div>
+            </div>
+          ))}
+          <button onClick={addComponent} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">
+            + Add component
+          </button>
+        </Plate>
+
+        <Plate title="Rough vessel drawing">
+          <WaterTankDrawing diameter_mm={process.diameter_mm} freeboard_mm={process.freeboard_mm} layers={allLayers.map(l => ({ label: l.label, depth: l.depth_mm, fill: l.fill }))} headType={headType} filterType={filterLabel} />
+        </Plate>
+
+        <Plate title="Media layers (computed)">
+          {allLayers.map((l, i) => (
+            <div key={i} className="flex items-center justify-between py-1.5 border-b border-neutral-800 last:border-0">
+              <div>
+                <div className="text-xs font-semibold text-neutral-200">{l.label}{l.isPrimary ? <span className="text-amber-500"> (primary)</span> : ""}</div>
+                <div className="text-[10px] text-neutral-500">{[l.brand, l.model].filter(Boolean).join(" — ") || "no brand/model set"}</div>
+              </div>
+              <div className="text-right font-mono text-xs text-neutral-200">
+                {fmt(l.depth_mm,0)}mm<br/><span className="text-[10px] text-neutral-500">{fmt(l.volume_L,0)}L</span>
+              </div>
+            </div>
+          ))}
+        </Plate>
+
+        <Plate title="Process sizing result">
+          <Readout label="Cross-sectional area" value={fmt(process.area,3)} unit="m²" />
+          <Readout label="Vessel diameter" value={fmt(process.diameter_mm,0)} unit="mm" big />
+          <Readout label="Service velocity" value={fmt(process.velocity ?? flow/process.area,1)} unit="m/hr" />
+          {filterType === "carbon" && (
+            <>
+              <Readout label="Bed volume" value={fmt(process.bedVolume,2)} unit="m³" />
+              <Readout label="Actual EBCT" value={fmt(process.actualEbct,1)} unit="min" />
+            </>
+          )}
+          {filterType === "softener" && (
+            <>
+              <Readout label="Resin volume required" value={fmt(process.resinVolume_L,0)} unit="L" big />
+              <Readout label="Salt required per regeneration" value={fmt(process.saltPerRegen_kg,1)} unit="kg" />
+              <Readout label="Regenerations per week (approx.)" value={fmt(process.regensPerWeek,1)} unit="" />
+              <Readout label="Brine tank salt storage" value={fmt(process.brineSaltStorage_kg,0)} unit="kg" />
+              <Readout label="Suggested brine tank volume" value={fmt(process.brineTankVolume_L,0)} unit="L" big />
+            </>
+          )}
+        </Plate>
+
+        <Plate title="Mechanical dimensions">
+          <Readout label="Straight shell height" value={fmt(mechanical.straightHeight_mm,0)} unit="mm" />
+          <Readout label="Head depth (each)" value={fmt(mechanical.headDepth_mm,0)} unit="mm" />
+          <Readout label="Overall height (incl. legs)" value={fmt(mechanical.overallHeight_mm,0)} unit="mm" big />
+          <Readout label="Suggested pipe size" value={fmt(mechanical.pipeSize_mm,0)} unit="mm" big />
+        </Plate>
+      </div>
+
+      <div className="print-sheet text-black bg-white p-6" style={{ fontFamily: "Arial, sans-serif" }}>
+        <div className="print-section flex justify-between items-start border-b-2 border-black pb-2 mb-3">
+          <div>
+            <div className="text-lg font-bold">WATER TREATMENT VESSEL DATA SHEET</div>
+            <div className="text-xs">{filterLabel}</div>
+          </div>
+          <div className="text-right text-xs">
+            <div>Doc No: {docNo || "—"}</div>
+            <div>Date: ____________________</div>
+          </div>
+        </div>
+
+        <div className="print-section">
+          <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+            <tbody>
+              <tr><td className="border border-black px-2 py-1 font-bold w-1/4">Tag No.</td><td className="border border-black px-2 py-1 w-1/4">{tag}</td><td className="border border-black px-2 py-1 font-bold w-1/4">Service</td><td className="border border-black px-2 py-1 w-1/4">{service}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="print-section">
+          <div className="font-bold text-sm mb-1 mt-3">GENERAL ARRANGEMENT</div>
+          <div style={{ maxWidth: "420px", margin: "0 auto" }}>
+            <WaterTankDrawing diameter_mm={process.diameter_mm} freeboard_mm={process.freeboard_mm} layers={allLayers.map(l => ({ label: l.label, depth: l.depth_mm, fill: l.fill }))} headType={headType} filterType={filterLabel} />
+          </div>
+        </div>
+
+        <div className="print-section">
+          <div className="font-bold text-sm mb-1 mt-3">PROCESS DESIGN</div>
+          <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+            <tbody>
+              <tr><td className="border border-black px-2 py-1 font-bold">Design Flow Rate</td><td className="border border-black px-2 py-1">{fmt(flow,1)} m³/hr</td>
+                  <td className="border border-black px-2 py-1 font-bold">Service Velocity</td><td className="border border-black px-2 py-1">{fmt(process.velocity ?? flow/process.area,1)} m/hr</td></tr>
+              {filterType === "softener" && (
+                <>
+                  <tr><td className="border border-black px-2 py-1 font-bold">Raw Water Hardness</td><td className="border border-black px-2 py-1">{fmt(hardness,0)} mg/L as CaCO₃</td>
+                      <td className="border border-black px-2 py-1 font-bold">Resin Volume</td><td className="border border-black px-2 py-1">{fmt(process.resinVolume_L,0)} L</td></tr>
+                  <tr><td className="border border-black px-2 py-1 font-bold">Salt / Regeneration</td><td className="border border-black px-2 py-1">{fmt(process.saltPerRegen_kg,1)} kg</td>
+                      <td className="border border-black px-2 py-1 font-bold">Brine Tank Volume</td><td className="border border-black px-2 py-1">{fmt(process.brineTankVolume_L,0)} L</td></tr>
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="print-section">
+          <div className="font-bold text-sm mb-1 mt-3">MECHANICAL / DIMENSIONAL</div>
+          <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+            <tbody>
+              <tr><td className="border border-black px-2 py-1 font-bold">Vessel Diameter</td><td className="border border-black px-2 py-1">{fmt(process.diameter_mm,0)} mm</td>
+                  <td className="border border-black px-2 py-1 font-bold">Overall Height</td><td className="border border-black px-2 py-1">{fmt(mechanical.overallHeight_mm,0)} mm</td></tr>
+              <tr><td className="border border-black px-2 py-1 font-bold">Material</td><td className="border border-black px-2 py-1">{material}</td>
+                  <td className="border border-black px-2 py-1 font-bold">Head Type</td><td className="border border-black px-2 py-1">{headType}</td></tr>
+              <tr><td className="border border-black px-2 py-1 font-bold">Design Pressure</td><td className="border border-black px-2 py-1" colSpan="3">{fmt(designPressureBar,1)} barg</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="print-section">
+          <div className="font-bold text-sm mb-1 mt-3">MEDIA LAYERS (top to bottom)</div>
+          <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th className="border border-black px-2 py-1">Layer</th>
+                <th className="border border-black px-2 py-1">Brand</th>
+                <th className="border border-black px-2 py-1">Model/Grade</th>
+                <th className="border border-black px-2 py-1">Depth</th>
+                <th className="border border-black px-2 py-1">Volume</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allLayers.map((l, i) => (
+                <tr key={i}>
+                  <td className="border border-black px-2 py-1">{l.label}{l.isPrimary ? " (primary)" : ""}</td>
+                  <td className="border border-black px-2 py-1">{l.brand}</td>
+                  <td className="border border-black px-2 py-1">{l.model}</td>
+                  <td className="border border-black px-2 py-1">{fmt(l.depth_mm,0)} mm</td>
+                  <td className="border border-black px-2 py-1">{fmt(l.volume_L,0)} L</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="print-section">
+          <div className="font-bold text-sm mb-1 mt-3">PIPING & VALVES</div>
+          <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+            <tbody>
+              <tr><td className="border border-black px-2 py-1 font-bold">Suggested Pipe Size</td><td className="border border-black px-2 py-1">{fmt(mechanical.pipeSize_mm,0)} mm</td>
+                  <td className="border border-black px-2 py-1 font-bold">Pipe Material</td><td className="border border-black px-2 py-1">{pipeMaterial}</td></tr>
+              <tr><td className="border border-black px-2 py-1 font-bold">Valve Type</td><td className="border border-black px-2 py-1" colSpan="3">{valveType}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="print-section">
+          <div className="font-bold text-sm mb-1 mt-3">ADDITIONAL COMPONENTS</div>
+          <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th className="border border-black px-2 py-1">Description</th>
+                <th className="border border-black px-2 py-1">Qty</th>
+                <th className="border border-black px-2 py-1">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {components.map((c, i) => (
+                <tr key={i}>
+                  <td className="border border-black px-2 py-1">{c.description}</td>
+                  <td className="border border-black px-2 py-1">{c.qty}</td>
+                  <td className="border border-black px-2 py-1">{c.notes}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="print-section">
+          <div className="grid grid-cols-3 gap-4 mt-6 text-xs">
+            <div>Prepared by: ______________________</div>
+            <div>Checked by: ______________________</div>
+            <div>Approved by: ______________________</div>
+          </div>
+          <div className="text-[9px] text-neutral-600 mt-4 leading-relaxed">
+            Preliminary process sizing for a {filterLabel.toLowerCase()} vessel. Media depths, filtration rates,
+            and resin capacity are typical design values — confirm against media/resin supplier data for the
+            actual product selected. This sheet does not include a full ASME pressure/thickness design; see the
+            Tank/Vessel tab for that calculation if a formal pressure vessel design is required.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ================= STEP GRATE HYDRAULIC TIMING PANEL =================
+function StepGratePanel() {
+  const [stroke, setStroke] = useState(175);
+
+  // Fuel type & moisture (biomass only — this furnace/grate is a solid-fuel feed)
+  const biomassFuels = FUEL_PRESETS.filter(f => f.kind === "biomass");
+  const [fuelLabel, setFuelLabel] = useState(biomassFuels[0].label);
+  const [hhvDryKcal, setHhvDryKcal] = useState(biomassFuels[0].hhvDry_kcal);
+  const [moisturePct, setMoisturePct] = useState(biomassFuels[0].moisture);
+  const [hDryPct, setHDryPct] = useState(biomassFuels[0].hDry);
+  const [bulkDensity, setBulkDensity] = useState(biomassFuels[0].bulkDensity);
+
+  const onSelectFuel = (label) => {
+    setFuelLabel(label);
+    const f = biomassFuels.find(x => x.label === label);
+    setHhvDryKcal(f.hhvDry_kcal); setMoisturePct(f.moisture); setHDryPct(f.hDry); setBulkDensity(f.bulkDensity);
+  };
+
+  // Boiler capacity -> required firing rate (real heat balance, same method as Fuel Consumption tab)
+  const [boilerCapacityTPH, setBoilerCapacityTPH] = useState(10);
+  const [steamPressureBar, setSteamPressureBar] = useState(10);
+  const [feedwaterTemp, setFeedwaterTemp] = useState(80);
+  const [boilerEff, setBoilerEff] = useState(80);
+
+  const firing = useMemo(() => {
+    const steamFlow = boilerCapacityTPH * 1000;
+    const pBarA = steamPressureBar + 1.01325;
+    const steam = steamLookupByPressure(pBarA);
+    const hf = feedwaterTemp * 4.186;
+    const dutyPerKg = steam.hg - hf;
+    const dutyTotal_kJhr = steamFlow * dutyPerKg;
+    const lhv_kJkg = lhvAsFiredKJkg(hhvDryKcal, moisturePct, hDryPct);
+    const fuelEnergyNeeded_kJhr = dutyTotal_kJhr / (boilerEff / 100);
+    const firingRate_kgHr = fuelEnergyNeeded_kJhr / lhv_kJkg;
+    return { steamTsat: steam.T, hg: steam.hg, hf, dutyPerKg, dutyTotal_kW: dutyTotal_kJhr / 3600, lhv_kcalkg: lhv_kJkg / KCAL_TO_KJ, firingRate_kgHr };
+  }, [boilerCapacityTPH, steamPressureBar, feedwaterTemp, boilerEff, hhvDryKcal, moisturePct, hDryPct]);
+
+  // Grate bed geometry -> suggested Zone 1 speed, from the computed firing rate
+  const [grateWidth, setGrateWidth] = useState(2.0);
+  const [bedDepth, setBedDepth] = useState(150);
+
+  const suggestedSpeed = useMemo(() => {
+    const speed_mHr = firing.firingRate_kgHr / (bulkDensity * grateWidth * (bedDepth / 1000));
+    return (speed_mHr * 1000) / 60;
+  }, [firing.firingRate_kgHr, bulkDensity, grateWidth, bedDepth]);
+
+  // Feed mechanism
+  const [feedType, setFeedType] = useState("screw"); // 'screw' | 'hydraulic'
+  const [numScrews, setNumScrews] = useState(4);
+  const [ramStroke, setRamStroke] = useState(300);
+  const [ramPushSec, setRamPushSec] = useState(6);
+  const [ramRetractSec, setRamRetractSec] = useState(5);
+  const [ramDwellSec, setRamDwellSec] = useState(20);
+  const [ramCrossSection, setRamCrossSection] = useState(0.15);
+
+  const feedCalc = useMemo(() => {
+    if (feedType === "screw") {
+      const perScrewRate = firing.firingRate_kgHr / numScrews;
+      return { perScrewRate };
+    } else {
+      const cycleTime = ramPushSec + ramRetractSec + ramDwellSec;
+      const pushesPerHour = 3600 / cycleTime;
+      const volumePerPush_m3 = ramCrossSection * (ramStroke / 1000);
+      const massPerPush_kg = volumePerPush_m3 * bulkDensity;
+      const deliveredRate_kgHr = massPerPush_kg * pushesPerHour;
+      return { cycleTime, pushesPerHour, massPerPush_kg, deliveredRate_kgHr };
+    }
+  }, [feedType, firing.firingRate_kgHr, numScrews, ramPushSec, ramRetractSec, ramDwellSec, ramStroke, ramCrossSection, bulkDensity]);
+
+  const [zones, setZones] = useState([
+    { id: "z1", label: "Zone 1 — Drying", length: 2.0, residence: 8, pushSec: 5, retractSec: 4 },
+    { id: "z2", label: "Zone 2 — Combustion", length: 2.5, residence: 6, pushSec: 5, retractSec: 4 },
+    { id: "z3", label: "Zone 3 — Burnout", length: 1.5, residence: 4, pushSec: 5, retractSec: 4 },
+  ]);
+  const updateZone = (id, field, val) => setZones(zones.map(z => (z.id === id ? { ...z, [field]: val } : z)));
+
+  const results = useMemo(() => {
+    return zones.map(z => {
+      const zoneLength_mm = z.length * 1000;
+      const requiredSpeed_mmMin = zoneLength_mm / z.residence;
+      const cycleTime_sec = (stroke / requiredSpeed_mmMin) * 60;
+      const dwellTime_sec = cycleTime_sec - z.pushSec - z.retractSec;
+      const pushesPerHour = 3600 / cycleTime_sec;
+      const strokesToTraverse = zoneLength_mm / stroke;
+      const feasible = dwellTime_sec >= 0;
+      return { ...z, requiredSpeed_mmMin, cycleTime_sec, dwellTime_sec, pushesPerHour, strokesToTraverse, feasible };
+    });
+  }, [zones, stroke]);
+
+  const totalLength = zones.reduce((s, z) => s + z.length, 0);
+  const totalResidence = zones.reduce((s, z) => s + z.residence, 0);
+  const anyInfeasible = results.some(r => !r.feasible);
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "Firing rate", value: fmt(firing.firingRate_kgHr,0), unit: "kg/hr" },
+        { label: "Total residence", value: fmt(totalResidence,1), unit: "min" },
+        ...(anyInfeasible ? [{ label: "Timing", value: "infeasible", unit: "", warn: true }] : []),
+      ]} />
+
+      <Plate title="Inputs">
+        <SubHeader>Fuel type & moisture</SubHeader>
+        <Select label="Fuel" value={fuelLabel} onChange={onSelectFuel} options={biomassFuels.map(f => ({ label: f.label }))} />
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="HHV, dry basis" unit="kcal/kg" step="50" value={hhvDryKcal} onChange={setHhvDryKcal} />
+          <Field label="Moisture content" unit="% as-fired" step="1" value={moisturePct} onChange={setMoisturePct} hint="Biggest single lever on both LHV and required firing rate — use the actual batch value if known." />
+        </div>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Hydrogen, dry basis" unit="%" step="0.5" value={hDryPct} onChange={setHDryPct} />
+          <Field label="Bulk density" unit="kg/m³" step="10" value={bulkDensity} onChange={setBulkDensity} hint="Varies a lot by fuel — PKS/pellets are dense, rice husk is very light." />
+        </div>
+        <Readout label="LHV as-fired" value={fmt(firing.lhv_kcalkg,0)} unit="kcal/kg" />
+
+        <SubHeader>Boiler duty → required firing rate</SubHeader>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Boiler capacity" unit="TPH steam" step="0.5" value={boilerCapacityTPH} onChange={setBoilerCapacityTPH} hint="Sized 3–15 TPH range." />
+          <Field label="Steam pressure" unit="barg" step="0.5" value={steamPressureBar} onChange={setSteamPressureBar} />
+        </div>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Feedwater temp." unit="°C" step="1" value={feedwaterTemp} onChange={setFeedwaterTemp} />
+          <Field label="Boiler efficiency" unit="%" step="1" value={boilerEff} onChange={setBoilerEff} hint="Typical 75–83% for biomass grate-fired." />
+        </div>
+        <Readout label="Heat duty" value={fmt(firing.dutyTotal_kW,0)} unit="kW" />
+        <Readout label="Required firing rate" value={fmt(firing.firingRate_kgHr,0)} unit="kg/hr" big />
+
+        <SubHeader>Grate bed geometry</SubHeader>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Grate width" unit="m" step="0.1" value={grateWidth} onChange={setGrateWidth} />
+          <Field label="Average bed depth" unit="mm" step="10" value={bedDepth} onChange={setBedDepth} />
+        </div>
+        <Readout label="Suggested Zone 1 speed" value={fmt(suggestedSpeed,1)} unit="mm/min" big />
+
+        <SubHeader>Fuel feed mechanism</SubHeader>
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setFeedType("screw")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${feedType === "screw" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Screw conveyors (VFD)</button>
+          <button onClick={() => setFeedType("hydraulic")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${feedType === "hydraulic" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Hydraulic ram pusher</button>
+        </div>
+        {feedType === "screw" ? (
+          <Field label="Number of screws" unit="units" step="1" value={numScrews} onChange={setNumScrews} hint="Typically 3–6 units across the grate width, each on its own VFD." />
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Ram stroke" unit="mm" step="10" value={ramStroke} onChange={setRamStroke} />
+              <Field label="Ram cross-section" unit="m²" step="0.01" value={ramCrossSection} onChange={setRamCrossSection} hint="Feed chute/ram bore area." />
+            </div>
+            <div className="grid grid-cols-3 gap-x-2">
+              <Field label="Push" unit="sec" step="0.5" value={ramPushSec} onChange={setRamPushSec} />
+              <Field label="Retract" unit="sec" step="0.5" value={ramRetractSec} onChange={setRamRetractSec} />
+              <Field label="Dwell" unit="sec" step="0.5" value={ramDwellSec} onChange={setRamDwellSec} />
+            </div>
+          </>
+        )}
+
+        <SubHeader>Zone settings</SubHeader>
+        {zones.map((z) => (
+          <div key={z.id} className="border border-neutral-800 rounded p-3 mb-3">
+            <TextField label="Zone label" value={z.label} onChange={(v) => updateZone(z.id, "label", v)} />
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Zone length" unit="m" step="0.1" value={z.length} onChange={(v) => updateZone(z.id, "length", v)} />
+              <Field label="Desired residence time" unit="min" step="0.5" value={z.residence} onChange={(v) => updateZone(z.id, "residence", v)} />
+            </div>
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Push (extend) time" unit="sec" step="0.5" value={z.pushSec} onChange={(v) => updateZone(z.id, "pushSec", v)} hint="Hydraulic cylinder forward stroke time." />
+              <Field label="Retract time" unit="sec" step="0.5" value={z.retractSec} onChange={(v) => updateZone(z.id, "retractSec", v)} />
+            </div>
+          </div>
+        ))}
+      </Plate>
+
+      <Plate title="Feed mechanism result">
+        {feedType === "screw" ? (
+          <>
+            <Readout label="Required capacity per screw" value={fmt(feedCalc.perScrewRate,0)} unit="kg/hr" big />
+            <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+              Use the Screw Conveyor tab to size each screw's diameter/speed/motor for this per-unit capacity.
+              With VFD on each, you get fine feed-rate trim per screw — useful for balancing bed depth across
+              the grate width, not just overall throughput.
+            </div>
+          </>
+        ) : (
+          <>
+            <Readout label="Cycle time" value={fmt(feedCalc.cycleTime,1)} unit="sec" />
+            <Readout label="Pushes per hour" value={fmt(feedCalc.pushesPerHour,1)} unit="strokes/hr" />
+            <Readout label="Mass delivered per push" value={fmt(feedCalc.massPerPush_kg,1)} unit="kg" />
+            <Readout label="Delivered feed rate" value={fmt(feedCalc.deliveredRate_kgHr,0)} unit="kg/hr" big />
+            <Readout label="Required firing rate" value={fmt(firing.firingRate_kgHr,0)} unit="kg/hr" />
+            {Math.abs(feedCalc.deliveredRate_kgHr - firing.firingRate_kgHr) / firing.firingRate_kgHr > 0.1 && (
+              <div className="mt-2 text-[11px] text-amber-400 bg-amber-950/30 border border-amber-900 rounded px-2 py-1.5">
+                Delivered rate is more than 10% off the required firing rate — adjust dwell time to close the gap.
+              </div>
+            )}
+          </>
+        )}
+      </Plate>
+
+      <Plate title="Feed mechanism — engineering trade-offs">
+        <div className="text-xs text-neutral-300 leading-relaxed space-y-2">
+          <p><span className="font-bold text-sky-400">Multiple VFD screws (3–6 units):</span> feed is continuous
+          and independently trimmable per screw, which lets you balance fuel distribution across the grate
+          <em> width</em> — a common real problem with single-point feeding is the center of the grate running
+          fuel-rich while the edges starve for fuel and run excess air. Continuous feed also avoids the
+          "feast-famine" cycling that pulsed feeding can cause, generally giving steadier bed temperature and
+          more complete combustion with lower CO/unburned carbon. Trade-off: screws don't tolerate oversized
+          pieces, tramp metal, or very stringy/wet material well, and each screw is a wear/maintenance point.</p>
+          <p><span className="font-bold text-amber-400">Hydraulic ram pusher:</span> more tolerant of irregular,
+          oversized, or bulky fuel (wood slabs, larger pieces) since it pushes rather than augers. Feed is
+          inherently pulsed rather than continuous — each stroke delivers a "slug" of fuel, which can cause
+          periodic bed-depth and temperature fluctuation if strokes are too large or infrequent. This is
+          manageable with small strokes and frequent pushes (approximating continuous feed), but gives coarser
+          feed-rate control than a VFD screw, and typically only feeds from one point rather than distributing
+          across width unless multiple rams are installed.</p>
+          <p><span className="font-bold text-neutral-100">On "more complete combustion":</span> the mechanism
+          itself doesn't combust anything — the outcome depends on how <em>steady</em> and <em>evenly
+          distributed</em> the resulting feed is. A well-tuned multi-screw system usually has an edge for
+          this specifically because of continuous, width-distributed feed; a ram system can perform
+          comparably if sized with a small stroke and high push frequency relative to the fuel's residence
+          time in Zone 1. Both approaches are used successfully across the 3–15 TPH range — the choice is
+          often driven as much by fuel characteristics (size, moisture, stringiness) and cost/maintenance
+          preference as by combustion performance alone.</p>
+        </div>
+      </Plate>
+
+      <Plate title="Hydraulic timing result">
+        {results.map((r) => (
+          <div key={r.id} className="border-b border-neutral-800 last:border-0 py-3">
+            <div className="text-sm font-bold text-neutral-100 mb-1">{r.label}</div>
+            <Readout label="Required grate speed" value={fmt(r.requiredSpeed_mmMin,1)} unit="mm/min" />
+            <Readout label="Cycle time (push→push)" value={fmt(r.cycleTime_sec,1)} unit="sec" big />
+            <Readout label="Required dwell (pause) time" value={fmt(r.dwellTime_sec,1)} unit="sec" big />
+            <Readout label="Pushes per hour" value={fmt(r.pushesPerHour,1)} unit="strokes/hr" />
+            <Readout label="Strokes to traverse zone" value={fmt(r.strokesToTraverse,1)} unit="strokes" />
+            {!r.feasible && (
+              <div className="mt-2 text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1.5">
+                Push + retract time alone ({fmt(r.pushSec + r.retractSec,1)}s) exceeds the cycle time needed
+                for this residence time — this speed isn't achievable with the current hydraulic cylinder
+                speed. Either speed up the push/retract stroke, shorten this zone, or accept a longer residence time.
+              </div>
+            )}
+          </div>
+        ))}
+      </Plate>
+
+      <div className="text-[10px] text-neutral-500 leading-relaxed px-1">
+        Each zone's push frequency (dwell time) is the actual PLC/hydraulic timer setting you'd tune on site —
+        stroke and push/retract speed are usually fixed by the cylinder and hydraulic pump, so dwell time is
+        the practical control lever for residence time. In real operation, final dwell times are commonly
+        trimmed against observed flame front position, grate O2, and ash burnout quality rather than held
+        rigidly to a calculated value — treat this as a commissioning starting point.
+      </div>
+    </div>
+  );
+}
+
+// ================= SPEC SHEET GENERATOR HELPERS =================
+function bhpFromDuty(capacityKgHr, pressureBarG, feedwaterTempC) {
+  const pBarA = pressureBarG + 1.01325;
+  const steam = steamLookupByPressure(pBarA);
+  const hf = feedwaterTempC * 4.186;
+  const dutyPerKg = steam.hg - hf;
+  const dutyTotal_kJhr = capacityKgHr * dutyPerKg;
+  const equivEvap_kgHr = dutyTotal_kJhr / 2257;
+  const bhp = equivEvap_kgHr / 15.65;
+  return { dutyTotal_kW: dutyTotal_kJhr / 3600, equivEvap_kgHr, bhp };
+}
+
+function KVRow({ item, onChangeKey, onChangeVal, onRemove }) {
+  return (
+    <div className="flex gap-2 mb-2 items-start">
+      <input type="text" value={item.key} onChange={(e) => onChangeKey(e.target.value)} placeholder="Item"
+        className="flex-1 bg-neutral-900 border border-neutral-700 focus:border-amber-500 focus:outline-none rounded px-2 py-1.5 text-neutral-100 text-xs" />
+      <input type="text" value={item.value} onChange={(e) => onChangeVal(e.target.value)} placeholder="Value/spec"
+        className="flex-[1.4] bg-neutral-900 border border-neutral-700 focus:border-amber-500 focus:outline-none rounded px-2 py-1.5 text-neutral-100 text-xs" />
+      <button onClick={onRemove} className="text-neutral-500 hover:text-red-400 text-xs px-1 pt-2">✕</button>
+    </div>
+  );
+}
+
+function newId() { return Math.random().toString(36).slice(2); }
+function hydrateRows(rows) { return (rows || []).map(r => ({ id: newId(), ...r })); }
+function hydrateEquip(sections) {
+  return (sections || []).map(s => ({
+    id: newId(), title: s.title,
+    specs: hydrateRows(s.specs), materials: hydrateRows(s.materials), nozzles: hydrateRows(s.nozzles),
+  }));
+}
+
+const GENERIC_OWNER_SCOPE = "1. Construction of boiler housing\n2. Piling and Foundation works as recommended by Thanaphon Engineering Co., Ltd.\n3. Piping works downstream of main valves\n4. Provision of main power supply and connection to the Main Control Panel\n5. Fuel supply and Storage facilities\n6. Access ways for transportation, handling and installation of equipment\n7. Drainage or sewage system for boiler blowdown water.";
+const GENERIC_MFR_SCOPE = "1. Manufacture and supply of all equipment and systems specified in this proposal.\n2. Execution of required testing and non-destructive examination (NDE) on essential components.\n3. Transportation of equipment to the project site.\n4. Submission of complete Manufacturing Data Report (MDR), Fabrication Certificates and as-built drawings.\n5. Provision of foundation and installation drawings for civil and structural works.";
+const GENERIC_PAYMENT = [
+  { milestone: "Contract Confirmation", pct: "40%", desc: "Payable upon signing the contract to initiate procurement and engineering work." },
+  { milestone: "Pre-Delivery Clearance", pct: "30%", desc: "Due when the boiler and associated equipment are ready for dispatch, before installation." },
+  { milestone: "Commissioning & Start-Up", pct: "20%", desc: "Payable upon successful installation, testing, and operational start-up." },
+  { milestone: "Final Handover Assurance", pct: "10%", desc: "Due 30 days after successful project completion and handover." },
+];
+const GENERIC_INTERLOCKS = [
+  { condition: "Low Water Level", trigger: "Water level drops below critical threshold", response: "Audible alarm + automatic combustion cutoff" },
+  { condition: "High Steam Pressure", trigger: "Steam pressure exceeds safe operating limit", response: "Audible alarm + automatic combustion cutoff" },
+  { condition: "High Flue Gas Temperature", trigger: "Exhaust gas temperature exceeds set point", response: "Audible alarm + automatic combustion cutoff" },
+];
+const GENERIC_CONTROL_INTERFACE = "HMI Control Panel: 11\" Touchscreen mounted on Main Control Panel (MCP). Displayed Parameters: Steam Pressure, Temperature, Status, alarms and historical data. User-friendly visualization for monitoring and operating all boiler functions.";
+const GENERIC_COMBUSTION_CONTROL = "Operation Mode: Fully automatic control system. Control Logic: Real time feedback from steam pressure. Failsafe Design: In Manual mode, combustion operation is interlocked and disabled for operator safety.";
+const GENERIC_FEEDWATER_PUMP_CONTROL = "Mode Selection: Automatic or Manual operation selectable. Automatic: Pump operation based on boiler water level sensors, ensures consistent and safe water supply. Manual: Combustion is automatically disabled to prevent unsafe conditions; Pump selection (Primary/Standby) available via control panel.";
+const TPE_NIMBUS_SECTION = {
+  title: "Smart Monitoring — TPE Nimbus",
+  specs: [
+    { key: "Real-Time Data Feed", value: "24/7 dashboard displaying live pressure, temperature, and water-usage" },
+    { key: "Performance Timeline", value: "Record & visualize trends for better analysis and maintenance planning" },
+    { key: "Google Cloud Backup", value: "All data securely stored and automatically backed up to Google Cloud" },
+    { key: "ChatApp Integration", value: "Alerts and performance updates instantly delivered to your mobile" },
+    { key: "Alarm & Notifications", value: "Instant alerts when any operational parameter exceeds safety limits" },
+  ],
+  materials: [], nozzles: [],
+};
+
+// ================= MODEL LINE TEMPLATES =================
+const MODEL_TEMPLATES = {
+  CBD_STEP: {
+    label: "CBD — Step Grate (Automatic Biomass)",
+    model: "CHAMPION © CBD-5000 Hybrid Biomass Steam Boiler",
+    boilerType: "Combi Firetube + Watertube, Step grate stoker",
+    capacityKgHr: 5000, pressureBarG: 8, feedwaterTemp: 105,
+    designCode: "ASME BPVC Sec. I, certified by LRQA.",
+    efficiencyPct: 82,
+    fuelTypeDesc: "Multi – Biomass (Woodchips, Pellets, Palm Shell, etc.)",
+    controlsDesc: "Fully Automatic PLC + HMI (DELTA) with VFD drives",
+    isBiomass: true,
+    mainComponents: [
+      { key: "Boiler Body", value: "Firetube (2-pass, dry back), Watertube Furnace walls, Heating surface 208.6 m²" },
+      { key: "Combustion and Furnaces", value: "Step grate stoker, FD and Secondary fans, Refractory lined chamber" },
+      { key: "Efficiency Maximize", value: "Economizer, Air Preheater, Deaerator" },
+      { key: "Fuel Handling System", value: "Automatic Moving floor and Sidewall with Cleat Belt Conveyor" },
+      { key: "Fuel Weight Scale", value: "Digital Conveyor weight scale max 5TPH" },
+      { key: "Ash Handling System", value: "Automatic Discharged at Rotary Air Locks (under grates, under cyclone), Ash Screw Conveyor (end grates)" },
+      { key: "Draft and Air System", value: "ID Fan 12,700 CFM @ 10.5 in wg., 30 HP" },
+      { key: "VFD", value: "ABB or DELTA or Equivalent" },
+      { key: "Gas Cleaning", value: "Multicyclone (75% eff., Cast iron cyclones d320), Venturi Wet Scrubber (SUS304)" },
+      { key: "Stack", value: "SUS304, d760 x 28.0 m." },
+      { key: "Control and Safety", value: "DELTA PLC + HMI, DP draft transmitter, O2 Sensor" },
+      { key: "Steam Outlet Control", value: "Steam Flow Meter + Control Valve (Pneumatic)" },
+      { key: "Motor", value: "SIEMENS, IE3" },
+      { key: "Auxiliaries", value: "Automatic Blowdown, Blowdown Tank, chemical dosing unit, pumps, valves, etc." },
+    ],
+    fuelRows: [
+      { fuel: "Wood chips", lhv: 2600, req: 1250, moisture: "35-45%", ash: "1–2%" },
+      { fuel: "Wood Pellet", lhv: 4200, req: 800, moisture: "<10%", ash: "<1%" },
+      { fuel: "Palm Shell", lhv: 3700, req: 1000, moisture: "8–12%", ash: "2–3%" },
+      { fuel: "Rice Husk", lhv: 3000, req: 1100, moisture: "10–15%", ash: "15–20%" },
+    ],
+    emissionRows: [
+      { key: "Total suspended particulate (TSP)", value: "< 320 mg/Nm³" },
+      { key: "Sulfur Dioxide (SO2)", value: "< 60 mg/Nm³" },
+      { key: "NOx", value: "< 200 mg/Nm³" },
+      { key: "Carbon Monoxide (CO)", value: "< 690 mg/Nm³" },
+      { key: "Opacity", value: "< 10 %" },
+    ],
+    storageRows: [
+      { fuel: "Woodchips (Stockpile)", movingFloor: "12.0 MT", storage: "30.0 MT" },
+      { fuel: "Wood Pellet (Big bag)", movingFloor: "30.0 MT", storage: "55–65 Big bags" },
+      { fuel: "Saw dust (Stockpile)", movingFloor: "8.0 MT", storage: "20.0 MT" },
+      { fuel: "Palm Shell (Stockpile)", movingFloor: "25.0 MT", storage: "60.0 MT" },
+    ],
+    techSpecRows: [
+      { key: "Heating Surface", value: "208.6 m²" },
+      { key: "MAWP / Test Pressure", value: "10 / 15 bar" },
+      { key: "Welding Method", value: "SAW and SMAW" },
+      { key: "Tubing Method", value: "Expanded and beaded" },
+      { key: "Non-destructive Test", value: "100% RT and PT" },
+      { key: "Installation Area", value: "12 x 20.0 m. (Excluding fuel storage area)" },
+      { key: "Insulation", value: "Rockwool 80K 2\"/Aluminum cladding" },
+    ],
+    feedwaterRows: [
+      { key: "Temperature", value: "85 – 99 °C" },
+      { key: "pH", value: "7 – 9" },
+      { key: "Total Hardness", value: "< 10 ppm" },
+      { key: "Total Dissolved Solids (TDS)", value: "< 350 ppm" },
+      { key: "Total Alkalinity (CaCO₃)", value: "< 500 ppm" },
+    ],
+    powerSupply: "380 V, 3 Phase, 50 Hz",
+    controlInterface: GENERIC_CONTROL_INTERFACE,
+    combustionControlText: GENERIC_COMBUSTION_CONTROL,
+    feedwaterPumpControlText: GENERIC_FEEDWATER_PUMP_CONTROL,
+    interlockRows: GENERIC_INTERLOCKS,
+    ownerScope: GENERIC_OWNER_SCOPE, manufacturerScope: GENERIC_MFR_SCOPE,
+    validityDays: 30, deliveryDays: 90, installationDays: 21,
+    paymentRows: GENERIC_PAYMENT, warrantyYears: 2,
+    warrantyText: "Placeholder — no source document for this model's warranty terms yet; using generic terms.",
+    equipSections: [
+      {
+        title: "Boiler Body",
+        specs: [{ key: "Type", value: "Firetube, 2 passes, Dry back" }],
+        materials: [
+          { no: "1", desc: "Boiler's shell", material: "SA-516 Gr.70", dim1: "OD2,200", dim2: "L6,000", thk: "15.00" },
+          { no: "2", desc: "Boiler's tubesheets", material: "SA-516 Gr.70", dim1: "⌀2,200", dim2: "", thk: "19.00" },
+          { no: "3", desc: "Firetubes – 1st Pass", material: "SA-192", dim1: "OD63.5", dim2: "L6,000", thk: "3.2" },
+          { no: "4", desc: "Staytubes – 1st Pass", material: "A-192", dim1: "OD63.5", dim2: "L6,000", thk: "4.5" },
+          { no: "5", desc: "Firetubes – 2nd Pass", material: "A-192", dim1: "OD76.5", dim2: "L6,000", thk: "3.2" },
+          { no: "6", desc: "Staytubes – 2nd Pass", material: "A-192", dim1: "OD76.5", dim2: "L6,000", thk: "5.5" },
+          { no: "7", desc: "Stayrods", material: "SA-36", dim1: "⌀38", dim2: "L6,000", thk: "38" },
+          { no: "8", desc: "Nozzles", material: "SA-106 Gr.B", dim1: "", dim2: "", thk: "SCH40" },
+          { no: "9", desc: "Flanges", material: "SA-36", dim1: "", dim2: "", thk: "PN16" },
+        ],
+        nozzles: [
+          { no: "1", desc: "Steam Outlet", tag: "N-3", size: "125A" },
+          { no: "2", desc: "Feed water Inlet", tag: "N-11", size: "50A" },
+          { no: "3", desc: "Bottom Blowdown", tag: "N-12", size: "50A" },
+          { no: "4", desc: "Handhole", tag: "H-01", size: "150A" },
+        ],
+      },
+      {
+        title: "Biomass Furnace",
+        specs: [
+          { key: "Type of stroker", value: "Step grate stoker" },
+          { key: "Grate bars", value: "GB RtCr16 (High Temperature Resistance Cast Steel)" },
+          { key: "Upper side walls", value: "Water tubes, A-192" },
+          { key: "Lower side walls", value: "Refractory bricks and Insulation Bricks" },
+          { key: "Fuel Feeding System", value: "3 sets, Adjustable Screw Conveyor, 0.75kW motor each, VFD (DELTA C2000+)" },
+          { key: "Fuel Belt Conveyor", value: "Sidewall with Cleat, 600mm width, 14.0m length, 1.5-2.0 m/s, 5.5kW motor" },
+        ],
+        materials: [], nozzles: [],
+      },
+      {
+        title: "Multi Cyclones",
+        specs: [
+          { key: "Efficiency", value: "75%" },
+          { key: "Casing", value: "SS-400 (JIS), 6.00mm" },
+          { key: "Ash Removal", value: "Rotary Air Lock, 8\", 1HP" },
+        ],
+        materials: [], nozzles: [],
+      },
+      {
+        title: "Induced Draft Fan",
+        specs: [{ key: "Capability", value: "12,700 CFM, SP 10.5 in.WG" }, { key: "Speed Controller", value: "VFD" }],
+        materials: [], nozzles: [],
+      },
+      { title: "Stack", specs: [{ key: "Material", value: "SUS304" }, { key: "Dimensions", value: "OD760 mm x 28,000 mm" }], materials: [], nozzles: [] },
+      { title: "Deaerator Tank", specs: [{ key: "Type", value: "Horizontal Pressure Vessel, Spray and Tray" }, { key: "Volume", value: "7.5 m³" }, { key: "Design Pressure / Hydrotest", value: "7 bar / 10.5 bar" }], materials: [], nozzles: [] },
+      { title: "Venturi Wet Scrubber", specs: [{ key: "Removal Efficiency", value: "Up to 90%" }, { key: "Scrubber Column", value: "SS-400, 6.00mm" }], materials: [], nozzles: [] },
+    ],
+  },
+
+  CBD_SLOPE: {
+    label: "CBD — Slope/Fixed Grate (Manual Biomass)",
+    model: "CHAMPION © CBD-3000 Biomass Steam Boiler (Fixed Grate)",
+    boilerType: "Firetube, 2-pass, dry back, fixed/slope grate, manually fed",
+    capacityKgHr: 3000, pressureBarG: 8, feedwaterTemp: 100,
+    designCode: "ASME BPVC Sec. I",
+    efficiencyPct: 78,
+    fuelTypeDesc: "Biomass (Wood chips, Sawdust, etc.) — manually fed",
+    controlsDesc: "Semi-automatic PLC (combustion draft/water level automated; fuel feeding manual)",
+    isBiomass: true,
+    mainComponents: [
+      { key: "Boiler Body", value: "Firetube, 2-pass, dry back — heating surface project-specific" },
+      { key: "Combustion and Furnace", value: "Fixed/slope grate, manually fed via front door, FD fan, refractory lined chamber" },
+      { key: "Fuel Handling", value: "Manual loading — no automated conveyor system" },
+      { key: "Ash Handling", value: "Manual ash raking and removal via ash pit door" },
+      { key: "Gas Cleaning", value: "Multicyclone (typical 70–80% eff.); wet scrubber optional per emission limits" },
+    ],
+    fuelRows: [
+      { fuel: "Wood chips", lhv: 2600, req: 750, moisture: "35-45%", ash: "1–2%" },
+      { fuel: "Sawdust", lhv: 2800, req: 700, moisture: "30–40%", ash: "1–2%" },
+    ],
+    emissionRows: [
+      { key: "Total suspended particulate (TSP)", value: "< 320 mg/Nm³" },
+      { key: "NOx", value: "< 200 mg/Nm³" },
+      { key: "Carbon Monoxide (CO)", value: "< 690 mg/Nm³" },
+    ],
+    storageRows: [{ fuel: "Woodchips (Stockpile, manual reclaim)", movingFloor: "—", storage: "15.0 MT" }],
+    techSpecRows: [
+      { key: "MAWP / Test Pressure", value: "10 / 15 bar" },
+      { key: "Welding Method", value: "SAW and SMAW" },
+      { key: "Non-destructive Test", value: "Per ASME BPVC Sec.I requirement" },
+      { key: "Insulation", value: "Rockwool 80K 2\"/Aluminum cladding" },
+    ],
+    feedwaterRows: [
+      { key: "Temperature", value: "85 – 99 °C" }, { key: "pH", value: "7 – 9" },
+      { key: "Total Hardness", value: "< 10 ppm" }, { key: "Total Dissolved Solids (TDS)", value: "< 350 ppm" },
+      { key: "Total Alkalinity (CaCO₃)", value: "< 500 ppm" },
+    ],
+    powerSupply: "380 V, 3 Phase, 50 Hz",
+    controlInterface: "HMI Control Panel mounted on Main Control Panel (MCP), monitoring water level, pressure, and draft.",
+    combustionControlText: "Draft/combustion air automated via PLC; fuel feeding is manual (operator-loaded via front door) — feed rate is operator-dependent rather than precisely metered.",
+    feedwaterPumpControlText: GENERIC_FEEDWATER_PUMP_CONTROL,
+    interlockRows: GENERIC_INTERLOCKS.slice(0, 2),
+    ownerScope: GENERIC_OWNER_SCOPE, manufacturerScope: GENERIC_MFR_SCOPE,
+    validityDays: 30, deliveryDays: 75, installationDays: 14,
+    paymentRows: GENERIC_PAYMENT, warrantyYears: 2,
+    warrantyText: "Placeholder — no source document for this model's warranty terms yet; using generic terms.",
+    equipSections: [
+      {
+        title: "Boiler Body", specs: [{ key: "Type", value: "Firetube, 2 passes, Dry back" }],
+        materials: [
+          { no: "1", desc: "Boiler's shell", material: "SA-516 Gr.70", dim1: "project-specific", dim2: "", thk: "project-specific" },
+          { no: "2", desc: "Firetubes", material: "SA-192", dim1: "project-specific", dim2: "", thk: "project-specific" },
+          { no: "3", desc: "Nozzles", material: "SA-106 Gr.B", dim1: "", dim2: "", thk: "SCH40" },
+        ], nozzles: [],
+      },
+      { title: "Fixed/Slope Grate Furnace", specs: [
+        { key: "Grate type", value: "Fixed/sloped, cast iron or steel grate bars" },
+        { key: "Fuel loading", value: "Manual, via front feed door" },
+        { key: "Ash removal", value: "Manual, via ash pit door" },
+      ], materials: [], nozzles: [] },
+      { title: "Multi Cyclone", specs: [{ key: "Efficiency", value: "70–80%" }], materials: [], nozzles: [] },
+      { title: "Stack", specs: [{ key: "Material", value: "Carbon steel or SUS304, sized per project" }], materials: [], nozzles: [] },
+    ],
+  },
+
+  CRF: {
+    label: "CRF — LPG Reversed Flame Firetube, Wet Back",
+    model: "CHAMPION© CRF-100 LPG Fired Steam Boiler",
+    boilerType: "Firetube, reversed flame, wet back, 3 passes",
+    capacityKgHr: 1500, pressureBarG: 8, feedwaterTemp: 80,
+    designCode: "ASME BPVC Sec. I, certified by LRQA.",
+    efficiencyPct: 88,
+    fuelTypeDesc: "LPG (Liquefied Petroleum Gas)",
+    controlsDesc: "Fully Automatic, Modulating combustion, Pressure controlled. Smart Monitoring: TPE Nimbus.",
+    isBiomass: false,
+    mainComponents: [],
+    fuelRows: [{ fuel: "LPG", lhv: 11000, req: 90, moisture: "—", ash: "—" }],
+    emissionRows: [],
+    storageRows: [],
+    techSpecRows: [
+      { key: "Steam boiler characteristics", value: "Fire tubes, 3 passes, Wet back steam boiler" },
+      { key: "Equivalent evaporation rate", value: "1,500 kg (steam)/hr." },
+      { key: "MAWP / Test Pressure", value: "10 / 15 bar" },
+      { key: "Welding Method", value: "SAW and SMAW" },
+      { key: "Tubing Method", value: "Expanded and beaded" },
+      { key: "Non-destructive Test", value: "100% RT and PT" },
+      { key: "Installation Area", value: "5.0 x 5.0 m. (Excluding fuel storage area)" },
+      { key: "Insulation", value: "Rockwool 100K 4\"/Aluminum cladding" },
+    ],
+    feedwaterRows: [
+      { key: "Temperature", value: "85 – 99 °C" }, { key: "pH", value: "7 – 9" },
+      { key: "Total Hardness", value: "< 10 ppm" }, { key: "Total Dissolved Solids (TDS)", value: "< 350 ppm" },
+      { key: "Total Alkalinity (CaCO₃)", value: "< 500 ppm" },
+    ],
+    powerSupply: "380 V, 3 Phase, 50 Hz",
+    controlInterface: GENERIC_CONTROL_INTERFACE,
+    combustionControlText: GENERIC_COMBUSTION_CONTROL,
+    feedwaterPumpControlText: GENERIC_FEEDWATER_PUMP_CONTROL,
+    interlockRows: GENERIC_INTERLOCKS,
+    ownerScope: "1. Construction of boiler housing\n2. Piling and Foundation works as recommended by Thanaphon Engineering Co., Ltd.\n3. Piping works: (a) Steam Piping downstream of the main steam valve; (b) Feedwater piping of the feedwater pumps\n4. Provision of main power supply and connection to the Main Control Panel\n5. Fuel supply and Storage facilities\n6. Access ways for transportation, handling and installation of equipment\n7. Drainage or sewage system for boiler blowdown water.",
+    manufacturerScope: GENERIC_MFR_SCOPE,
+    validityDays: 30, deliveryDays: 90, installationDays: 14,
+    paymentRows: [
+      { milestone: "Contract Confirmation", pct: "40%", desc: "Payable upon signing the contract to initiate procurement and engineering work." },
+      { milestone: "Successful NDE", pct: "10%", desc: "Payable upon handling of RT Reports on Pressure Parts" },
+      { milestone: "Pre-Delivery Clearance", pct: "10%", desc: "Due when the boiler and associated equipment are ready for dispatch, before installation." },
+      { milestone: "Commissioning & Start-Up", pct: "20%", desc: "Payable upon successful installation, testing, and operational start-up." },
+      { milestone: "Final Handover Assurance", pct: "10%", desc: "Due 30 days after successful project completion and handover." },
+    ],
+    warrantyYears: 2,
+    warrantyText: "Covers boiler pressure parts (shell, furnace, tube sheet, fire tubes, welded joints), combustion system (burner, combustion air fan, gas train, fuel piping within skid), instrumentation & controls, and installation workmanship. Excludes normal wear/corrosion/scaling from poor water quality, misuse, unauthorized modifications, electrical damage from unstable power supply, consumables (gaskets/seals/filters/refractories), and third-party components. Purchaser must notify Supplier in writing within 7 days of discovering a defect.",
+    equipSections: [
+      {
+        title: "Boiler Body",
+        specs: [],
+        materials: [
+          { no: "1", desc: "Boiler's shell", material: "SA-516 Gr.70 (JPN/KOR)", dim1: "ID1,700 x 2,200", dim2: "", thk: "15.00" },
+          { no: "2", desc: "Boiler's tubesheets", material: "SA-516 Gr.70 (JPN/KOR)", dim1: "⌀1,700", dim2: "", thk: "19.00" },
+          { no: "3", desc: "Furnace", material: "SA-516 Gr.70 (JPN/KOR)", dim1: "ID850 x 2,880", dim2: "", thk: "15.00" },
+          { no: "4", desc: "Furnace end plate", material: "SA-516 Gr.70 (JPN/KOR)", dim1: "⌀850", dim2: "", thk: "19.00" },
+          { no: "5", desc: "Furnace stiffening ring", material: "SA-516 Gr.70 (JPN/KOR)", dim1: "⌀874 x 974", dim2: "", thk: "15.00" },
+          { no: "6", desc: "Firetube", material: "SA-192 or STB35.5", dim1: "OD50.8", dim2: "", thk: "WT3.2" },
+          { no: "7", desc: "Staytube", material: "SA-192 or STB35.5", dim1: "OD50.8", dim2: "", thk: "WT4.0" },
+          { no: "8", desc: "Gusset Stay", material: "SA-516 Gr.70 (JPN/KOR)", dim1: "", dim2: "", thk: "As per dwg." },
+          { no: "9", desc: "Lifting Lugs", material: "SA-516 Gr.70 (JPN/KOR)", dim1: "", dim2: "", thk: "As per dwg." },
+          { no: "10", desc: "Saddle", material: "SA-36 (TIS.)", dim1: "", dim2: "", thk: "As per dwg." },
+          { no: "11", desc: "Front smoke box", material: "SA-36 (TIS.)", dim1: "", dim2: "", thk: "As per dwg." },
+          { no: "12", desc: "Rear smoke box", material: "SA-36 (TIS.)", dim1: "", dim2: "", thk: "As per dwg." },
+          { no: "13", desc: "Nozzles", material: "SA-106 Gr.B", dim1: "", dim2: "", thk: "SCH40" },
+          { no: "14", desc: "Flanges", material: "SA-36 (TIS.)", dim1: "", dim2: "", thk: "PN16" },
+        ],
+        nozzles: [],
+      },
+      {
+        title: "System Equipment",
+        specs: [
+          { key: "1. LPG Burner", value: "RIELLO — 1 EA" },
+          { key: "2. Water feed pump", value: "1.5kW / 2.0HP, CALPEDA (ITA) — 2 EA" },
+          { key: "3. Feed water Globe Valve", value: "PN16 DN25, ARITA — 5 EA" },
+          { key: "4. Feed water Check Valve", value: "PN16 DN25, ARITA — 3 EA" },
+          { key: "5. Feed water Y-Strainer", value: "PN16 DN25, ARITA — 2 EA" },
+          { key: "6. Pressure Gauge", value: "⌀2\" — 2 EA" },
+          { key: "7. Hot water meter", value: "Digital flow meter — 1 EA" },
+          { key: "8. Steam Flow Meter", value: "Vortex flow meter, 0–20 bar — 1 EA" },
+          { key: "9. Water Level Control", value: "Magnetic level controller — 2 EA" },
+          { key: "10. Sight glass", value: "2 EA" },
+          { key: "11. Pressure Gauge", value: "⌀6\" — 1 EA" },
+          { key: "12. Pressure Transmitter", value: "SUPMEA, 0–25 bar — 1 EA" },
+          { key: "13. Pressure Switch", value: "L404A, 0–16 bar, HONEYWELL — 2 EA" },
+          { key: "14. Safety Valve", value: "PN16 DN40 x D65, VYC — 2 EA" },
+          { key: "15. Main Valve", value: "PN16 DN80, ARI — 1 EA" },
+          { key: "16. Bottom Blowdown", value: "PN16 DN25, automatic — 2 EA" },
+          { key: "17. Manhole", value: "⌀360 x ⌀440mm — 1 EA" },
+          { key: "18. Handhole", value: "⌀200mm — 4 EA" },
+          { key: "19. System Control", value: "PLC, 11\" Touchscreen panel — 1 EA" },
+          { key: "20. Control Panel", value: "Floor mounted — 1 EA" },
+          { key: "21. Chemical Dosing unit", value: "Metering pump, 1.9–2.2 L/hr, 220V 50Hz; 100L PE tank + suction/discharge tube + injector" },
+          { key: "22. Stack", value: "SUS304, 4.0mm, OD500 x 12,000mm, with inspection port 3\"" },
+        ],
+        materials: [], nozzles: [],
+      },
+      TPE_NIMBUS_SECTION,
+    ],
+  },
+
+  CWT: {
+    label: "CWT — LPG Once-Through Boiler",
+    model: "CHAMPION© CWT-033 LPG Fired Once Through Boiler",
+    boilerType: "Water tube, single pass, once-through, instant steam generation",
+    capacityKgHr: 500, pressureBarG: 8, feedwaterTemp: 70,
+    designCode: "ASME BPVC Sec. I, certified by LRQA.",
+    efficiencyPct: 92,
+    fuelTypeDesc: "LPG (Liquefied Petroleum Gas)",
+    controlsDesc: "Pressure controlled, fully automatic control system. Smart Monitoring: TPE Nimbus.",
+    isBiomass: false,
+    mainComponents: [],
+    fuelRows: [{ fuel: "LPG", lhv: 11000, req: 29, moisture: "—", ash: "—" }],
+    emissionRows: [],
+    storageRows: [],
+    techSpecRows: [
+      { key: "Steam boiler characteristics", value: "Water tube, single pass" },
+      { key: "Equivalent evaporation rate", value: "500 kg (steam)/hr." },
+      { key: "MAWP / Test Pressure", value: "8 / 12.5 bar" },
+      { key: "Welding Method", value: "SAW and SMAW" },
+      { key: "Tubing Method", value: "Expanded and beaded" },
+      { key: "Non-destructive Test", value: "100% PT" },
+      { key: "Installation Area", value: "3.0 x 3.0 m. (Excluding fuel storage area)" },
+      { key: "Insulation", value: "Rockwool 100K 2\"/Aluminum cladding" },
+    ],
+    feedwaterRows: [
+      { key: "Temperature", value: "85 – 99 °C" }, { key: "pH", value: "7 – 9" },
+      { key: "Total Hardness", value: "< 10 ppm" }, { key: "Total Dissolved Solids (TDS)", value: "< 350 ppm" },
+      { key: "Total Alkalinity (CaCO₃)", value: "< 500 ppm" },
+    ],
+    powerSupply: "380 V, 3 Phase, 50 Hz",
+    controlInterface: GENERIC_CONTROL_INTERFACE,
+    combustionControlText: GENERIC_COMBUSTION_CONTROL,
+    feedwaterPumpControlText: GENERIC_FEEDWATER_PUMP_CONTROL,
+    interlockRows: GENERIC_INTERLOCKS,
+    ownerScope: "1. Piping works: (a) Steam Piping downstream of Steam Header to production; (b) Feedwater piping from reservoir to feed water tank.\n2. Provision of main power supply and connection to the Main Control Panel\n3. Fuel supply and Storage facilities\n4. Access ways for transportation, handling and installation of equipment\n5. Drainage or sewage system for boiler blowdown water.",
+    manufacturerScope: "1. Manufacture and supply of all equipment and systems specified in this proposal.\n2. Execution of required testing and non-destructive examination (NDE) on essential components.\n3. Construction of boiler housing.\n4. Piling and Foundation works.\n5. Transportation of equipment to the project site.\n6. Submission of complete Manufacturing Data Report (MDR), Fabrication Certificates and as-built drawings.\n7. Provision of foundation and installation drawings for civil and structural works.",
+    validityDays: 30, deliveryDays: 75, installationDays: 15,
+    paymentRows: GENERIC_PAYMENT,
+    warrantyYears: 3,
+    warrantyText: "3 years after work delivery or finish of the project.",
+    equipSections: [
+      {
+        title: "Boiler Body", specs: [],
+        materials: [
+          { no: "1", desc: "Headers", material: "SA-516 Gr.70", dim1: "", dim2: "", thk: "" },
+          { no: "2", desc: "Watertubes", material: "SA-192 or STB35.5", dim1: "", dim2: "", thk: "" },
+          { no: "3", desc: "Nozzles", material: "SA-106 Gr.B", dim1: "", dim2: "", thk: "" },
+          { no: "4", desc: "Flanges", material: "SA-36", dim1: "", dim2: "", thk: "" },
+        ],
+        nozzles: [],
+      },
+      {
+        title: "System Equipment",
+        specs: [
+          { key: "1. LPG Burner", value: "700 kW — 1 EA" },
+          { key: "2. Water feed pump", value: "1.5kW / 2.0HP, CALPEDA (ITA) — 1 EA" },
+          { key: "3. Feed water Globe Valve", value: "PN16 DN25, ARITA — 3 EA" },
+          { key: "4. Feed water Check Valve", value: "PN16 DN25, ARITA — 2 EA" },
+          { key: "5. Feed water Y-Strainer", value: "PN16 DN25, ARITA — 1 EA" },
+          { key: "6. Pressure Gauge", value: "⌀2\", 0–20 bar — 1 EA" },
+          { key: "7. Feed Water meter", value: "Digital flow meter — 1 EA" },
+          { key: "8. Water Level Control", value: "4-pole electrode — 1 EA" },
+          { key: "9. Sight glass", value: "A-6 with drain valve — 2 EA" },
+          { key: "10. Pressure Gauge", value: "⌀6\" — 1 EA" },
+          { key: "11. Pressure Transmitter", value: "TRAFAG, 0–25 bar — 1 EA" },
+          { key: "12. Pressure Switch", value: "L404A, 0–16 bar, HONEYWELL — 1 EA" },
+          { key: "13. Safety Valve", value: "PN16 DN25 x D40, VYC — 1 EA" },
+          { key: "14. Main Valve", value: "PN16 DN40, ARITA — 1 EA" },
+          { key: "15. Auto Bottom Blowdown", value: "PN16 DN25 — 1 EA" },
+          { key: "16. System Control", value: "PLC, DELTA — 1 EA" },
+          { key: "17. Control Panel", value: "Floor mounted, 11\" touchscreen — 1 EA" },
+          { key: "18. Economizer", value: "Shell and tube with circulated pump — 1 EA" },
+          { key: "19. Chemical Dosing unit", value: "50L with metering pump — 1 EA" },
+          { key: "20. Stack", value: "SUS304, 3.00mm, OD200 x 8,000mm — 1 EA" },
+        ],
+        materials: [], nozzles: [],
+      },
+      TPE_NIMBUS_SECTION,
+    ],
+  },
+};
+
+// ================= SPEC SHEET GENERATOR PANEL =================
+function SpecSheetPanel() {
+  const [client, setClient] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [docNo, setDocNo] = useState("");
+  const [rev, setRev] = useState("0");
+  const [dateStr, setDateStr] = useState("");
+
+  const [modelLine, setModelLine] = useState("CBD_STEP");
+  const t0 = MODEL_TEMPLATES.CBD_STEP;
+
+  const [model, setModel] = useState(t0.model);
+  const [boilerType, setBoilerType] = useState(t0.boilerType);
+  const [capacityKgHr, setCapacityKgHr] = useState(t0.capacityKgHr);
+  const [pressureBarG, setPressureBarG] = useState(t0.pressureBarG);
+  const [feedwaterTemp, setFeedwaterTemp] = useState(t0.feedwaterTemp);
+  const [designCode, setDesignCode] = useState(t0.designCode);
+  const [efficiencyPct, setEfficiencyPct] = useState(t0.efficiencyPct);
+  const [fuelTypeDesc, setFuelTypeDesc] = useState(t0.fuelTypeDesc);
+  const [controlsDesc, setControlsDesc] = useState(t0.controlsDesc);
+  const [isBiomass, setIsBiomass] = useState(t0.isBiomass);
+
+  const bhpCalc = useMemo(() => bhpFromDuty(capacityKgHr, pressureBarG, feedwaterTemp), [capacityKgHr, pressureBarG, feedwaterTemp]);
+
+  const [perfGuarantee, setPerfGuarantee] = useState("");
+  const defaultPerfGuarantee = `Supplier guarantees the system shall continuously produce ${fmt(capacityKgHr,0)} kg/h saturated steam at ${fmt(pressureBarG,1)} bar(g) using the specified design fuel (at average moisture%) at overall boiler-island efficiency of ${fmt(efficiencyPct,0)}% (Direct Method, ASME PTC-4). If unmet, Supplier will rectify and re-test.`;
+
+  const [mainComponents, setMainComponents] = useState(hydrateRows(t0.mainComponents));
+  const [fuelRows, setFuelRows] = useState(hydrateRows(t0.fuelRows));
+  const [emissionRows, setEmissionRows] = useState(hydrateRows(t0.emissionRows));
+  const [storageRows, setStorageRows] = useState(hydrateRows(t0.storageRows));
+  const [techSpecRows, setTechSpecRows] = useState(hydrateRows(t0.techSpecRows));
+  const [feedwaterRows, setFeedwaterRows] = useState(hydrateRows(t0.feedwaterRows));
+  const [powerSupply, setPowerSupply] = useState(t0.powerSupply);
+  const [controlInterface, setControlInterface] = useState(t0.controlInterface);
+  const [combustionControlText, setCombustionControlText] = useState(t0.combustionControlText);
+  const [feedwaterPumpControlText, setFeedwaterPumpControlText] = useState(t0.feedwaterPumpControlText);
+  const [interlockRows, setInterlockRows] = useState(hydrateRows(t0.interlockRows));
+  const [equipSections, setEquipSections] = useState(hydrateEquip(t0.equipSections));
+
+  const [ownerScope, setOwnerScope] = useState(t0.ownerScope);
+  const [manufacturerScope, setManufacturerScope] = useState(t0.manufacturerScope);
+  const [validityDays, setValidityDays] = useState(t0.validityDays);
+  const [deliveryDays, setDeliveryDays] = useState(t0.deliveryDays);
+  const [installationDays, setInstallationDays] = useState(t0.installationDays);
+  const [paymentRows, setPaymentRows] = useState(hydrateRows(t0.paymentRows));
+  const [warrantyYears, setWarrantyYears] = useState(t0.warrantyYears);
+  const [warrantyText, setWarrantyText] = useState(t0.warrantyText);
+
+  const applyTemplate = (key) => {
+    const t = MODEL_TEMPLATES[key];
+    setModelLine(key);
+    setModel(t.model); setBoilerType(t.boilerType);
+    setCapacityKgHr(t.capacityKgHr); setPressureBarG(t.pressureBarG); setFeedwaterTemp(t.feedwaterTemp);
+    setDesignCode(t.designCode); setEfficiencyPct(t.efficiencyPct);
+    setFuelTypeDesc(t.fuelTypeDesc); setControlsDesc(t.controlsDesc); setIsBiomass(t.isBiomass);
+    setPerfGuarantee("");
+    setMainComponents(hydrateRows(t.mainComponents));
+    setFuelRows(hydrateRows(t.fuelRows));
+    setEmissionRows(hydrateRows(t.emissionRows));
+    setStorageRows(hydrateRows(t.storageRows));
+    setTechSpecRows(hydrateRows(t.techSpecRows));
+    setFeedwaterRows(hydrateRows(t.feedwaterRows));
+    setPowerSupply(t.powerSupply); setControlInterface(t.controlInterface);
+    setCombustionControlText(t.combustionControlText); setFeedwaterPumpControlText(t.feedwaterPumpControlText);
+    setInterlockRows(hydrateRows(t.interlockRows));
+    setEquipSections(hydrateEquip(t.equipSections));
+    setOwnerScope(t.ownerScope); setManufacturerScope(t.manufacturerScope);
+    setValidityDays(t.validityDays); setDeliveryDays(t.deliveryDays); setInstallationDays(t.installationDays);
+    setPaymentRows(hydrateRows(t.paymentRows)); setWarrantyYears(t.warrantyYears); setWarrantyText(t.warrantyText);
+  };
+
+  const addEquipSection = () => setEquipSections([...equipSections, { id: newId(), title: "New Equipment", specs: [], materials: [], nozzles: [] }]);
+  const removeEquipSection = (id) => setEquipSections(equipSections.filter(s => s.id !== id));
+  const updateEquipTitle = (id, title) => setEquipSections(equipSections.map(s => (s.id === id ? { ...s, title } : s)));
+
+  const addSpecLine = (secId) => setEquipSections(equipSections.map(s => (s.id === secId ? { ...s, specs: [...s.specs, { id: newId(), key: "", value: "" }] } : s)));
+  const removeSpecLine = (secId, lineId) => setEquipSections(equipSections.map(s => (s.id === secId ? { ...s, specs: s.specs.filter(l => l.id !== lineId) } : s)));
+  const updateSpecLine = (secId, lineId, field, val) => setEquipSections(equipSections.map(s => (s.id === secId ? { ...s, specs: s.specs.map(l => (l.id === lineId ? { ...l, [field]: val } : l)) } : s)));
+
+  const listOps = (list, setList) => ({
+    add: (row) => setList([...list, { id: newId(), ...row }]),
+    remove: (id) => setList(list.filter(r => r.id !== id)),
+    update: (id, field, val) => setList(list.map(r => (r.id === id ? { ...r, [field]: val } : r))),
+  });
+
+  const mainCompOps = listOps(mainComponents, setMainComponents);
+  const fuelOps = listOps(fuelRows, setFuelRows);
+  const emissionOps = listOps(emissionRows, setEmissionRows);
+  const storageOps = listOps(storageRows, setStorageRows);
+  const techSpecOps = listOps(techSpecRows, setTechSpecRows);
+  const feedwaterOps = listOps(feedwaterRows, setFeedwaterRows);
+  const interlockOps = listOps(interlockRows, setInterlockRows);
+  const paymentOps = listOps(paymentRows, setPaymentRows);
+
+  return (
+    <div>
+      <style>{`
+        @page { size: A4; margin: 12mm; }
+        @media print {
+          .no-print { display: none !important; }
+          .print-sheet { display: block !important; }
+          body { background: white; }
+          .print-sheet table { page-break-inside: avoid; }
+          .print-sheet .print-section { page-break-inside: avoid; }
+        }
+        .print-sheet { display: none; }
+      `}</style>
+
+      <div className="no-print flex justify-end mb-3">
+        <button onClick={() => window.print()} className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wide bg-emerald-600 text-white hover:bg-emerald-500">
+          🖨 Print / Save as PDF
+        </button>
+      </div>
+
+      <div className="no-print">
+        <StickyResults items={[
+          { label: "Model line", value: MODEL_TEMPLATES[modelLine].label.split(" — ")[0], unit: "" },
+          { label: "Capacity", value: fmt(capacityKgHr,0), unit: "kg/hr" },
+          { label: "BHP", value: fmt(bhpCalc.bhp,1), unit: "BHP" },
+        ]} />
+
+        <Plate title="Model line">
+          <div className="grid grid-cols-1 gap-2 mb-1">
+            {Object.keys(MODEL_TEMPLATES).map((key) => (
+              <button key={key} onClick={() => applyTemplate(key)}
+                className={`py-2 px-3 rounded text-xs font-semibold text-left border ${modelLine === key ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>
+                {MODEL_TEMPLATES[key].label}
+              </button>
+            ))}
+          </div>
+          <div className="text-[10px] text-neutral-500 mt-2 leading-relaxed">
+            Switching model line replaces all fields below with that model's starting template — any edits
+            you've made will be overwritten, so switch first, then customize for the project.
+          </div>
+        </Plate>
+
+        <Plate title="Identification">
+          <div className="grid grid-cols-2 gap-x-3">
+            <TextField label="Client" value={client} onChange={setClient} />
+            <TextField label="Project name" value={projectName} onChange={setProjectName} />
+          </div>
+          <div className="grid grid-cols-3 gap-x-2">
+            <TextField label="Document no." value={docNo} onChange={setDocNo} />
+            <TextField label="Rev." value={rev} onChange={setRev} />
+            <TextField label="Date" value={dateStr} onChange={setDateStr} placeholder="DD/MM/YYYY" />
+          </div>
+        </Plate>
+
+        <Plate title="Boiler system overview">
+          <TextField label="Model" value={model} onChange={setModel} />
+          <TextField label="Type" value={boilerType} onChange={setBoilerType} />
+          <div className="grid grid-cols-2 gap-x-3">
+            <Field label="Capacity" unit="kg/hr steam" step="50" value={capacityKgHr} onChange={setCapacityKgHr} />
+            <Field label="Design pressure" unit="barg" step="0.5" value={pressureBarG} onChange={setPressureBarG} />
+          </div>
+          <Field label="Feedwater temperature (for BHP calc)" unit="°C" step="1" value={feedwaterTemp} onChange={setFeedwaterTemp} />
+          <TextField label="Design code / certification" value={designCode} onChange={setDesignCode} area />
+          <Field label="Efficiency" unit="% (Direct Method, ASME PTC-4)" step="1" value={efficiencyPct} onChange={setEfficiencyPct} />
+          <TextField label="Fuel type description" value={fuelTypeDesc} onChange={setFuelTypeDesc} />
+          <TextField label="Controls description" value={controlsDesc} onChange={setControlsDesc} />
+          <Readout label="Heat duty" value={fmt(bhpCalc.dutyTotal_kW,0)} unit="kW" />
+          <Readout label="Equivalent evaporation" value={fmt(bhpCalc.equivEvap_kgHr,0)} unit="kg/hr (f&a 100°C)" />
+          <Readout label="Boiler Horsepower (BHP)" value={fmt(bhpCalc.bhp,1)} unit="BHP" big />
+        </Plate>
+
+        <Plate title="Performance guarantee">
+          <TextField label="Statement (auto-drafted, edit freely)" value={perfGuarantee || defaultPerfGuarantee} onChange={setPerfGuarantee} area />
+        </Plate>
+
+        {mainComponents.length > 0 && (
+          <Plate title="Main system components">
+            {mainComponents.map((r) => (
+              <div key={r.id} className="border border-neutral-800 rounded p-2 mb-2 relative">
+                <button onClick={() => mainCompOps.remove(r.id)} className="absolute top-1 right-1 text-neutral-500 hover:text-red-400 text-xs px-1">✕</button>
+                <TextField label="Category" value={r.key} onChange={(v) => mainCompOps.update(r.id, "key", v)} />
+                <TextField label="Key equipment" value={r.value} onChange={(v) => mainCompOps.update(r.id, "value", v)} area />
+              </div>
+            ))}
+            <button onClick={() => mainCompOps.add({ key: "", value: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add row</button>
+          </Plate>
+        )}
+
+        <Plate title="Scope of work">
+          <TextField label="Project Owner scope" value={ownerScope} onChange={setOwnerScope} area />
+          <TextField label="Manufacturer scope" value={manufacturerScope} onChange={setManufacturerScope} area />
+        </Plate>
+
+        <Plate title={isBiomass ? "Fuel and heat balance" : "Fuel consumption"}>
+          {fuelRows.map((r) => (
+            <div key={r.id} className="border border-neutral-800 rounded p-2 mb-2 relative">
+              <button onClick={() => fuelOps.remove(r.id)} className="absolute top-1 right-1 text-neutral-500 hover:text-red-400 text-xs px-1">✕</button>
+              <TextField label="Fuel type" value={r.fuel} onChange={(v) => fuelOps.update(r.id, "fuel", v)} />
+              <div className="grid grid-cols-2 gap-x-2">
+                <Field label="LHV" unit="kcal/kg" value={r.lhv} onChange={(v) => fuelOps.update(r.id, "lhv", v)} />
+                <Field label="Required fuel" unit="kg/hr" value={r.req} onChange={(v) => fuelOps.update(r.id, "req", v)} />
+              </div>
+              {isBiomass && (
+                <div className="grid grid-cols-2 gap-x-2">
+                  <TextField label="Moisture %" value={r.moisture} onChange={(v) => fuelOps.update(r.id, "moisture", v)} />
+                  <TextField label="Ash %" value={r.ash} onChange={(v) => fuelOps.update(r.id, "ash", v)} />
+                </div>
+              )}
+            </div>
+          ))}
+          <button onClick={() => fuelOps.add({ fuel: "", lhv: isBiomass ? 3000 : 11000, req: 1000, moisture: "", ash: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add fuel row</button>
+        </Plate>
+
+        {emissionRows.length > 0 && (
+          <Plate title="Emission guarantees at stack">
+            {emissionRows.map((r) => <KVRow key={r.id} item={r} onChangeKey={(v) => emissionOps.update(r.id, "key", v)} onChangeVal={(v) => emissionOps.update(r.id, "value", v)} onRemove={() => emissionOps.remove(r.id)} />)}
+            <button onClick={() => emissionOps.add({ key: "", value: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add row</button>
+          </Plate>
+        )}
+
+        {storageRows.length > 0 && (
+          <Plate title={isBiomass ? "Fuel storage design" : "Fuel supply / storage"}>
+            {storageRows.map((r) => (
+              <div key={r.id} className="border border-neutral-800 rounded p-2 mb-2 relative">
+                <button onClick={() => storageOps.remove(r.id)} className="absolute top-1 right-1 text-neutral-500 hover:text-red-400 text-xs px-1">✕</button>
+                <TextField label="Fuel" value={r.fuel} onChange={(v) => storageOps.update(r.id, "fuel", v)} />
+                <div className="grid grid-cols-2 gap-x-2">
+                  <TextField label="Handling/Moving floor" value={r.movingFloor} onChange={(v) => storageOps.update(r.id, "movingFloor", v)} />
+                  <TextField label="Storage capacity" value={r.storage} onChange={(v) => storageOps.update(r.id, "storage", v)} />
+                </div>
+              </div>
+            ))}
+            <button onClick={() => storageOps.add({ fuel: "", movingFloor: "", storage: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add row</button>
+          </Plate>
+        )}
+
+        <Plate title="Technical specification">
+          {techSpecRows.map((r) => <KVRow key={r.id} item={r} onChangeKey={(v) => techSpecOps.update(r.id, "key", v)} onChangeVal={(v) => techSpecOps.update(r.id, "value", v)} onRemove={() => techSpecOps.remove(r.id)} />)}
+          <button onClick={() => techSpecOps.add({ key: "", value: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add row</button>
+        </Plate>
+
+        <Plate title="Recommended feedwater property">
+          {feedwaterRows.map((r) => <KVRow key={r.id} item={r} onChangeKey={(v) => feedwaterOps.update(r.id, "key", v)} onChangeVal={(v) => feedwaterOps.update(r.id, "value", v)} onRemove={() => feedwaterOps.remove(r.id)} />)}
+          <button onClick={() => feedwaterOps.add({ key: "", value: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add row</button>
+        </Plate>
+
+        <Plate title="Control system & safety">
+          <TextField label="Main power supply" value={powerSupply} onChange={setPowerSupply} />
+          <TextField label="Control interface" value={controlInterface} onChange={setControlInterface} area />
+          <TextField label="Combustion control" value={combustionControlText} onChange={setCombustionControlText} area />
+          <TextField label="Feedwater pump control" value={feedwaterPumpControlText} onChange={setFeedwaterPumpControlText} area />
+          <SubHeader>Interlocks & alarms</SubHeader>
+          {interlockRows.map((r) => (
+            <div key={r.id} className="border border-neutral-800 rounded p-2 mb-2 relative">
+              <button onClick={() => interlockOps.remove(r.id)} className="absolute top-1 right-1 text-neutral-500 hover:text-red-400 text-xs px-1">✕</button>
+              <TextField label="Condition" value={r.condition} onChange={(v) => interlockOps.update(r.id, "condition", v)} />
+              <TextField label="Trigger" value={r.trigger} onChange={(v) => interlockOps.update(r.id, "trigger", v)} />
+              <TextField label="Response" value={r.response} onChange={(v) => interlockOps.update(r.id, "response", v)} />
+            </div>
+          ))}
+          <button onClick={() => interlockOps.add({ condition: "", trigger: "", response: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add interlock</button>
+        </Plate>
+
+        <Plate title="Commercial terms & warranty">
+          <div className="grid grid-cols-3 gap-x-2">
+            <Field label="Validity" unit="days" value={validityDays} onChange={setValidityDays} />
+            <Field label="Delivery" unit="days" value={deliveryDays} onChange={setDeliveryDays} />
+            <Field label="Installation" unit="days" value={installationDays} onChange={setInstallationDays} />
+          </div>
+          <SubHeader>Payment milestones</SubHeader>
+          {paymentRows.map((r) => (
+            <div key={r.id} className="border border-neutral-800 rounded p-2 mb-2 relative">
+              <button onClick={() => paymentOps.remove(r.id)} className="absolute top-1 right-1 text-neutral-500 hover:text-red-400 text-xs px-1">✕</button>
+              <div className="grid grid-cols-2 gap-x-2">
+                <TextField label="Milestone" value={r.milestone} onChange={(v) => paymentOps.update(r.id, "milestone", v)} />
+                <TextField label="%" value={r.pct} onChange={(v) => paymentOps.update(r.id, "pct", v)} />
+              </div>
+              <TextField label="Description" value={r.desc} onChange={(v) => paymentOps.update(r.id, "desc", v)} area />
+            </div>
+          ))}
+          <button onClick={() => paymentOps.add({ milestone: "", pct: "", desc: "" })} className="w-full py-2 mb-3 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add milestone</button>
+          <SubHeader>Warranty</SubHeader>
+          <Field label="Warranty period" unit="years" value={warrantyYears} onChange={setWarrantyYears} />
+          <TextField label="Warranty terms" value={warrantyText} onChange={setWarrantyText} area />
+        </Plate>
+
+        <Plate title="Equipment sections">
+          <div className="text-[10px] text-neutral-500 mb-3 leading-relaxed">
+            One card per major piece of equipment. Each has free-form specs, and optional material/nozzle
+            tables for pressure-part equipment. Pre-filled per model line — edit numbers/text for the new
+            project, or add/remove entire sections.
+          </div>
+          {equipSections.map((sec) => (
+            <div key={sec.id} className="border border-neutral-700 rounded p-3 mb-4 relative">
+              <button onClick={() => removeEquipSection(sec.id)} className="absolute top-2 right-2 text-neutral-500 hover:text-red-400 text-xs px-1">✕ remove section</button>
+              <TextField label="Section title" value={sec.title} onChange={(v) => updateEquipTitle(sec.id, v)} />
+              <SubHeader>Specs</SubHeader>
+              {sec.specs.map((l) => (
+                <KVRow key={l.id} item={l} onChangeKey={(v) => updateSpecLine(sec.id, l.id, "key", v)} onChangeVal={(v) => updateSpecLine(sec.id, l.id, "value", v)} onRemove={() => removeSpecLine(sec.id, l.id)} />
+              ))}
+              <button onClick={() => addSpecLine(sec.id)} className="w-full py-1.5 mb-2 rounded text-[10px] font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add spec line</button>
+
+              {sec.materials.length > 0 && (
+                <>
+                  <SubHeader>Material list</SubHeader>
+                  {sec.materials.map((m) => (
+                    <div key={m.id} className="grid grid-cols-5 gap-1 mb-1 text-[10px]">
+                      <input value={m.desc} onChange={(e) => setEquipSections(equipSections.map(s => s.id === sec.id ? { ...s, materials: s.materials.map(x => x.id === m.id ? { ...x, desc: e.target.value } : x) } : s))} placeholder="Description" className="bg-neutral-900 border border-neutral-700 rounded px-1.5 py-1 text-neutral-100 col-span-2" />
+                      <input value={m.material} onChange={(e) => setEquipSections(equipSections.map(s => s.id === sec.id ? { ...s, materials: s.materials.map(x => x.id === m.id ? { ...x, material: e.target.value } : x) } : s))} placeholder="Material" className="bg-neutral-900 border border-neutral-700 rounded px-1.5 py-1 text-neutral-100" />
+                      <input value={m.thk} onChange={(e) => setEquipSections(equipSections.map(s => s.id === sec.id ? { ...s, materials: s.materials.map(x => x.id === m.id ? { ...x, thk: e.target.value } : x) } : s))} placeholder="Thickness" className="bg-neutral-900 border border-neutral-700 rounded px-1.5 py-1 text-neutral-100" />
+                      <button onClick={() => setEquipSections(equipSections.map(s => s.id === sec.id ? { ...s, materials: s.materials.filter(x => x.id !== m.id) } : s))} className="text-neutral-500 hover:text-red-400">✕</button>
+                    </div>
+                  ))}
+                </>
+              )}
+              {sec.nozzles.length > 0 && (
+                <>
+                  <SubHeader>Nozzle table</SubHeader>
+                  {sec.nozzles.map((n) => (
+                    <div key={n.id} className="grid grid-cols-4 gap-1 mb-1 text-[10px]">
+                      <input value={n.desc} onChange={(e) => setEquipSections(equipSections.map(s => s.id === sec.id ? { ...s, nozzles: s.nozzles.map(x => x.id === n.id ? { ...x, desc: e.target.value } : x) } : s))} placeholder="Description" className="bg-neutral-900 border border-neutral-700 rounded px-1.5 py-1 text-neutral-100 col-span-2" />
+                      <input value={n.tag} onChange={(e) => setEquipSections(equipSections.map(s => s.id === sec.id ? { ...s, nozzles: s.nozzles.map(x => x.id === n.id ? { ...x, tag: e.target.value } : x) } : s))} placeholder="Tag" className="bg-neutral-900 border border-neutral-700 rounded px-1.5 py-1 text-neutral-100" />
+                      <input value={n.size} onChange={(e) => setEquipSections(equipSections.map(s => s.id === sec.id ? { ...s, nozzles: s.nozzles.map(x => x.id === n.id ? { ...x, size: e.target.value } : x) } : s))} placeholder="Size" className="bg-neutral-900 border border-neutral-700 rounded px-1.5 py-1 text-neutral-100" />
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          ))}
+          <button onClick={addEquipSection} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add equipment section</button>
+        </Plate>
+      </div>
+
+      <div className="print-sheet text-black bg-white p-6" style={{ fontFamily: "Arial, sans-serif" }}>
+        <div className="border-b-2 border-black pb-2 mb-3">
+          <div className="text-lg font-bold">{model}</div>
+          <div className="text-xs">{boilerType}</div>
+          <div className="text-xs mt-1">Client: {client || "—"} | Project: {projectName || "—"} | Doc: {docNo || "—"} Rev.{rev} | Date: {dateStr || "—"}</div>
+        </div>
+
+        <div className="font-bold text-sm mb-1">BOILER SYSTEM OVERVIEW</div>
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <tbody>
+            <tr><td className="border border-black px-2 py-1 font-bold w-1/4">Capacity</td><td className="border border-black px-2 py-1 w-1/4">{fmt(capacityKgHr,0)} kg/h @ {fmt(pressureBarG,1)} barg</td>
+                <td className="border border-black px-2 py-1 font-bold w-1/4">BHP</td><td className="border border-black px-2 py-1 w-1/4">{fmt(bhpCalc.bhp,1)} BHP</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Design Code</td><td className="border border-black px-2 py-1" colSpan="3">{designCode}</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Efficiency</td><td className="border border-black px-2 py-1">{fmt(efficiencyPct,0)}% (Direct Method, ASME PTC-4)</td>
+                <td className="border border-black px-2 py-1 font-bold">Fuel</td><td className="border border-black px-2 py-1">{fuelTypeDesc}</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Controls</td><td className="border border-black px-2 py-1" colSpan="3">{controlsDesc}</td></tr>
+          </tbody>
+        </table>
+
+        <div className="font-bold text-sm mb-1">PERFORMANCE GUARANTEE</div>
+        <div className="text-xs mb-3 border border-black p-2">{perfGuarantee || defaultPerfGuarantee}</div>
+
+        {mainComponents.length > 0 && (
+          <>
+            <div className="font-bold text-sm mb-1">MAIN SYSTEM COMPONENTS</div>
+            <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+              <thead><tr><th className="border border-black px-2 py-1 w-1/3">Category</th><th className="border border-black px-2 py-1">Key Equipment</th></tr></thead>
+              <tbody>{mainComponents.map((r,i) => <tr key={i}><td className="border border-black px-2 py-1 font-bold">{r.key}</td><td className="border border-black px-2 py-1">{r.value}</td></tr>)}</tbody>
+            </table>
+          </>
+        )}
+
+        <div className="font-bold text-sm mb-1">SCOPE OF WORK</div>
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <tbody>
+            <tr><td className="border border-black px-2 py-1 font-bold w-1/2 align-top">Project Owner Scope</td><td className="border border-black px-2 py-1 font-bold w-1/2 align-top">Manufacturer Scope</td></tr>
+            <tr><td className="border border-black px-2 py-1 align-top" style={{whiteSpace:"pre-line"}}>{ownerScope}</td><td className="border border-black px-2 py-1 align-top" style={{whiteSpace:"pre-line"}}>{manufacturerScope}</td></tr>
+          </tbody>
+        </table>
+
+        <div className="font-bold text-sm mb-1">{isBiomass ? "FUEL AND HEAT BALANCE" : "FUEL CONSUMPTION"}</div>
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <thead><tr><th className="border border-black px-2 py-1">Fuel</th><th className="border border-black px-2 py-1">LHV (kcal/kg)</th><th className="border border-black px-2 py-1">Req. Fuel (kg/hr)</th>{isBiomass && <><th className="border border-black px-2 py-1">Moisture</th><th className="border border-black px-2 py-1">Ash</th></>}</tr></thead>
+          <tbody>{fuelRows.map((r,i) => <tr key={i}><td className="border border-black px-2 py-1">{r.fuel}</td><td className="border border-black px-2 py-1">{fmt(r.lhv,0)}</td><td className="border border-black px-2 py-1">{fmt(r.req,0)}</td>{isBiomass && <><td className="border border-black px-2 py-1">{r.moisture}</td><td className="border border-black px-2 py-1">{r.ash}</td></>}</tr>)}</tbody>
+        </table>
+
+        {emissionRows.length > 0 && (
+          <>
+            <div className="font-bold text-sm mb-1">EMISSION GUARANTEED AT STACK</div>
+            <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+              <tbody>{emissionRows.map((r,i) => <tr key={i}><td className="border border-black px-2 py-1 font-bold w-1/2">{r.key}</td><td className="border border-black px-2 py-1">{r.value}</td></tr>)}</tbody>
+            </table>
+          </>
+        )}
+
+        {storageRows.length > 0 && (
+          <>
+            <div className="font-bold text-sm mb-1">{isBiomass ? "FUEL STORAGE DESIGN" : "FUEL SUPPLY / STORAGE"}</div>
+            <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+              <thead><tr><th className="border border-black px-2 py-1">Fuel</th><th className="border border-black px-2 py-1">Handling</th><th className="border border-black px-2 py-1">Storage</th></tr></thead>
+              <tbody>{storageRows.map((r,i) => <tr key={i}><td className="border border-black px-2 py-1">{r.fuel}</td><td className="border border-black px-2 py-1">{r.movingFloor}</td><td className="border border-black px-2 py-1">{r.storage}</td></tr>)}</tbody>
+            </table>
+          </>
+        )}
+
+        <div className="font-bold text-sm mb-1">TECHNICAL SPECIFICATION</div>
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <tbody>{techSpecRows.map((r,i) => <tr key={i}><td className="border border-black px-2 py-1 font-bold w-1/3">{r.key}</td><td className="border border-black px-2 py-1">{r.value}</td></tr>)}</tbody>
+        </table>
+
+        <div className="font-bold text-sm mb-1">RECOMMENDED FEEDWATER PROPERTY</div>
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <tbody>{feedwaterRows.map((r,i) => <tr key={i}><td className="border border-black px-2 py-1 font-bold w-1/2">{r.key}</td><td className="border border-black px-2 py-1">{r.value}</td></tr>)}</tbody>
+        </table>
+
+        <div className="font-bold text-sm mb-1">CONTROL SYSTEM & SAFETY EQUIPMENT</div>
+        <table className="w-full text-xs mb-2" style={{ borderCollapse: "collapse" }}>
+          <tbody>
+            <tr><td className="border border-black px-2 py-1 font-bold w-1/4">Power Supply</td><td className="border border-black px-2 py-1" colSpan="3">{powerSupply}</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Control Interface</td><td className="border border-black px-2 py-1" colSpan="3">{controlInterface}</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Combustion Control</td><td className="border border-black px-2 py-1" colSpan="3">{combustionControlText}</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Feedwater Pump Control</td><td className="border border-black px-2 py-1" colSpan="3">{feedwaterPumpControlText}</td></tr>
+          </tbody>
+        </table>
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <thead><tr><th className="border border-black px-2 py-1">Condition</th><th className="border border-black px-2 py-1">Trigger</th><th className="border border-black px-2 py-1">Response</th></tr></thead>
+          <tbody>{interlockRows.map((r,i) => <tr key={i}><td className="border border-black px-2 py-1">{r.condition}</td><td className="border border-black px-2 py-1">{r.trigger}</td><td className="border border-black px-2 py-1">{r.response}</td></tr>)}</tbody>
+        </table>
+
+        {equipSections.map((sec, si) => (
+          <div key={si} style={{ pageBreakInside: "avoid" }}>
+            <div className="font-bold text-sm mb-1 mt-3">{sec.title.toUpperCase()}</div>
+            {sec.specs.length > 0 && (
+              <table className="w-full text-xs mb-2" style={{ borderCollapse: "collapse" }}>
+                <tbody>{sec.specs.map((l,i) => <tr key={i}><td className="border border-black px-2 py-1 font-bold w-1/3">{l.key}</td><td className="border border-black px-2 py-1">{l.value}</td></tr>)}</tbody>
+              </table>
+            )}
+            {sec.materials.length > 0 && (
+              <>
+                <div className="font-bold text-xs mb-1">Material List</div>
+                <table className="w-full text-xs mb-2" style={{ borderCollapse: "collapse" }}>
+                  <thead><tr><th className="border border-black px-1 py-0.5">No.</th><th className="border border-black px-1 py-0.5">Description</th><th className="border border-black px-1 py-0.5">Material</th><th className="border border-black px-1 py-0.5">Dim.1</th><th className="border border-black px-1 py-0.5">Dim.2</th><th className="border border-black px-1 py-0.5">Thk.</th></tr></thead>
+                  <tbody>{sec.materials.map((m,i) => <tr key={i}><td className="border border-black px-1 py-0.5">{m.no}</td><td className="border border-black px-1 py-0.5">{m.desc}</td><td className="border border-black px-1 py-0.5">{m.material}</td><td className="border border-black px-1 py-0.5">{m.dim1}</td><td className="border border-black px-1 py-0.5">{m.dim2}</td><td className="border border-black px-1 py-0.5">{m.thk}</td></tr>)}</tbody>
+                </table>
+              </>
+            )}
+            {sec.nozzles.length > 0 && (
+              <>
+                <div className="font-bold text-xs mb-1">Nozzle Table</div>
+                <table className="w-full text-xs mb-2" style={{ borderCollapse: "collapse" }}>
+                  <thead><tr><th className="border border-black px-1 py-0.5">No.</th><th className="border border-black px-1 py-0.5">Description</th><th className="border border-black px-1 py-0.5">Tag</th><th className="border border-black px-1 py-0.5">Size</th></tr></thead>
+                  <tbody>{sec.nozzles.map((n,i) => <tr key={i}><td className="border border-black px-1 py-0.5">{n.no}</td><td className="border border-black px-1 py-0.5">{n.desc}</td><td className="border border-black px-1 py-0.5">{n.tag}</td><td className="border border-black px-1 py-0.5">{n.size}</td></tr>)}</tbody>
+                </table>
+              </>
+            )}
+          </div>
+        ))}
+
+        <div className="font-bold text-sm mb-1 mt-3">QUOTATION TERMS</div>
+        <table className="w-full text-xs mb-2" style={{ borderCollapse: "collapse" }}>
+          <tbody>
+            <tr><td className="border border-black px-2 py-1 font-bold w-1/3">Validity</td><td className="border border-black px-2 py-1">{fmt(validityDays,0)} days</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Delivery Time</td><td className="border border-black px-2 py-1">{fmt(deliveryDays,0)} days</td></tr>
+            <tr><td className="border border-black px-2 py-1 font-bold">Installation</td><td className="border border-black px-2 py-1">{fmt(installationDays,0)} days</td></tr>
+          </tbody>
+        </table>
+        <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+          <thead><tr><th className="border border-black px-2 py-1">Milestone</th><th className="border border-black px-2 py-1">%</th><th className="border border-black px-2 py-1">Description</th></tr></thead>
+          <tbody>{paymentRows.map((r,i) => <tr key={i}><td className="border border-black px-2 py-1">{r.milestone}</td><td className="border border-black px-2 py-1">{r.pct}</td><td className="border border-black px-2 py-1">{r.desc}</td></tr>)}</tbody>
+        </table>
+
+        <div className="font-bold text-sm mb-1">WARRANTY</div>
+        <div className="text-xs mb-3 border border-black p-2">{fmt(warrantyYears,0)} years. {warrantyText}</div>
+
+        <div className="grid grid-cols-3 gap-4 mt-6 text-xs">
+          <div>Prepared by: ______________________</div>
+          <div>Checked by: ______________________</div>
+          <div>Approved by: ______________________</div>
+        </div>
+        <div className="text-[9px] text-neutral-600 mt-4 leading-relaxed">
+          Preliminary project spec sheet generated from a reusable template — figures should be confirmed
+          against the actual equipment supplier/vendor data before issue to a client.
+        </div>
+      </div>
+    </div>
+  );
+}
+// ================= GEOMETRY CALCULATOR HELPERS =================
+const SHAPES = ["Rectangle", "Circle", "Triangle", "Ellipse", "Cube / Rectangular Prism", "Cylinder", "Sphere", "Cone", "Pyramid (rectangular base)", "Trapezoidal Prism"];
+
+function geometryCalc(shape, d) {
+  switch (shape) {
+    case "Rectangle":
+      return { primary: [["Area", d.L * d.W, "m²"]], secondary: [["Perimeter", 2 * (d.L + d.W), "m"]] };
+    case "Circle":
+      return { primary: [["Area", Math.PI * d.r * d.r, "m²"]], secondary: [["Circumference", 2 * Math.PI * d.r, "m"]] };
+    case "Triangle":
+      return { primary: [["Area", 0.5 * d.b * d.h, "m²"]], secondary: [] };
+    case "Ellipse": {
+      const peri = Math.PI * (3 * (d.a + d.b) - Math.sqrt((3 * d.a + d.b) * (d.a + 3 * d.b)));
+      return { primary: [["Area", Math.PI * d.a * d.b, "m²"]], secondary: [["Perimeter (approx.)", peri, "m"]] };
+    }
+    case "Cube / Rectangular Prism":
+      return {
+        primary: [["Volume", d.L * d.W * d.H, "m³"]],
+        secondary: [["Surface Area", 2 * (d.L * d.W + d.L * d.H + d.W * d.H), "m²"]],
+      };
+    case "Cylinder": {
+      const vol = Math.PI * d.r * d.r * d.h;
+      const lateral = 2 * Math.PI * d.r * d.h;
+      const total = 2 * Math.PI * d.r * (d.r + d.h);
+      return { primary: [["Volume", vol, "m³"]], secondary: [["Lateral Surface", lateral, "m²"], ["Total Surface", total, "m²"]] };
+    }
+    case "Sphere": {
+      const vol = (4 / 3) * Math.PI * d.r ** 3;
+      const surf = 4 * Math.PI * d.r * d.r;
+      return { primary: [["Volume", vol, "m³"]], secondary: [["Surface Area", surf, "m²"]] };
+    }
+    case "Cone": {
+      const vol = (1 / 3) * Math.PI * d.r * d.r * d.h;
+      const slant = Math.sqrt(d.r * d.r + d.h * d.h);
+      const lateral = Math.PI * d.r * slant;
+      const total = Math.PI * d.r * (d.r + slant);
+      return { primary: [["Volume", vol, "m³"]], secondary: [["Slant Height", slant, "m"], ["Lateral Surface", lateral, "m²"], ["Total Surface", total, "m²"]] };
+    }
+    case "Pyramid (rectangular base)": {
+      const vol = (1 / 3) * d.L * d.W * d.h;
+      return { primary: [["Volume", vol, "m³"]], secondary: [["Base Area", d.L * d.W, "m²"]] };
+    }
+    case "Trapezoidal Prism": {
+      const area = 0.5 * (d.a + d.b) * d.h;
+      const vol = area * d.depth;
+      return { primary: [["Cross-section Area", area, "m²"], ["Volume", vol, "m³"]], secondary: [] };
+    }
+    default:
+      return { primary: [], secondary: [] };
+  }
+}
+
+const SHAPE_FIELDS = {
+  "Rectangle": [["L", "Length", "m"], ["W", "Width", "m"]],
+  "Circle": [["r", "Radius", "m"]],
+  "Triangle": [["b", "Base", "m"], ["h", "Height", "m"]],
+  "Ellipse": [["a", "Semi-major axis (a)", "m"], ["b", "Semi-minor axis (b)", "m"]],
+  "Cube / Rectangular Prism": [["L", "Length", "m"], ["W", "Width", "m"], ["H", "Height", "m"]],
+  "Cylinder": [["r", "Radius", "m"], ["h", "Height", "m"]],
+  "Sphere": [["r", "Radius", "m"]],
+  "Cone": [["r", "Base radius", "m"], ["h", "Height", "m"]],
+  "Pyramid (rectangular base)": [["L", "Base length", "m"], ["W", "Base width", "m"], ["h", "Height", "m"]],
+  "Trapezoidal Prism": [["a", "Top width (a)", "m"], ["b", "Bottom width (b)", "m"], ["h", "Trapezoid height", "m"], ["depth", "Extrusion depth", "m"]],
+};
+
+function GeometryCalculator() {
+  const [shape, setShape] = useState("Cylinder");
+  const [dims, setDims] = useState({ L: 2, W: 1.5, H: 1, r: 0.5, h: 2, b: 1, a: 1, depth: 3 });
+
+  const updateDim = (key, val) => setDims({ ...dims, [key]: val });
+  const result = useMemo(() => geometryCalc(shape, dims), [shape, dims]);
+
+  return (
+    <div>
+      <Plate title="Shape">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {SHAPES.map((s) => (
+            <button key={s} onClick={() => setShape(s)} className={`py-2 px-2 rounded text-[11px] font-semibold border ${shape === s ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>
+              {s}
+            </button>
+          ))}
+        </div>
+      </Plate>
+
+      <Plate title="Dimensions">
+        <div className="grid grid-cols-2 gap-x-3">
+          {SHAPE_FIELDS[shape].map(([key, label, unit]) => (
+            <Field key={key} label={label} unit={unit} step="0.01" value={dims[key]} onChange={(v) => updateDim(key, v)} />
+          ))}
+        </div>
+      </Plate>
+
+      <Plate title="Result">
+        {result.primary.map(([label, val, unit], i) => (
+          <Readout key={i} label={label} value={fmt(val,4)} unit={unit} big />
+        ))}
+        {result.secondary.map(([label, val, unit], i) => (
+          <Readout key={i} label={label} value={fmt(val,4)} unit={unit} />
+        ))}
+      </Plate>
+      <div className="text-[10px] text-neutral-500 leading-relaxed px-1">
+        Exact closed-form geometry (ellipse perimeter uses the standard Ramanujan approximation, accurate to
+        well under 0.1% for any practical aspect ratio). All inputs in metres — for mm, divide by 1000 first
+        or just treat the unit as whatever consistent length unit you're working in (results scale accordingly).
+      </div>
+    </div>
+  );
+}
+
+// ================= STANDALONE STEAM TABLE PANEL =================
+function SteamTableStandalonePanel() {
+  const [steamMode, setSteamMode] = useState("byPressure");
+  const [pressureInput, setPressureInput] = useState(9);
+  const [pressureIsGauge, setPressureIsGauge] = useState(true);
+  const [tempInput, setTempInput] = useState(175);
+
+  const steam = useMemo(() => {
+    if (steamMode === "byPressure") {
+      const pBarA = pressureIsGauge ? pressureInput + 1.01325 : pressureInput;
+      const r = steamLookupByPressure(pBarA);
+      return { ...r, pBarA, hfg: r.hg - r.hf };
+    } else {
+      const r = steamLookupByTemperature(tempInput);
+      return { ...r, T: tempInput, hfg: r.hg - r.hf };
+    }
+  }, [steamMode, pressureInput, pressureIsGauge, tempInput]);
+
+  return (
+    <div>
+      <Plate title="Saturated steam table">
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setSteamMode("byPressure")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${steamMode === "byPressure" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>By pressure</button>
+          <button onClick={() => setSteamMode("byTemp")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${steamMode === "byTemp" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>By temperature</button>
+        </div>
+        {steamMode === "byPressure" ? (
+          <>
+            <Field label="Pressure" unit={pressureIsGauge ? "barg" : "bara"} step="0.1" value={pressureInput} onChange={setPressureInput} />
+            <button onClick={() => setPressureIsGauge(!pressureIsGauge)} className="text-[10px] text-sky-400 underline mb-2">
+              Switch to {pressureIsGauge ? "absolute" : "gauge"}
+            </button>
+            <Readout label="Saturation temperature" value={fmt(steam.T,1)} unit="°C" big />
+          </>
+        ) : (
+          <>
+            <Field label="Temperature" unit="°C" step="1" value={tempInput} onChange={setTempInput} />
+            <Readout label="Saturation pressure" value={fmt(steam.pBarA ?? steam.P,2)} unit="bar abs" big />
+          </>
+        )}
+        <Readout label="hf (sat. liquid)" value={fmt(steam.hf,1)} unit="kJ/kg" />
+        <Readout label="hg (sat. vapour)" value={fmt(steam.hg,1)} unit="kJ/kg" />
+        <Readout label="hfg (latent heat)" value={fmt(steam.hfg,1)} unit="kJ/kg" />
+        <Readout label="vg (specific volume)" value={fmt(steam.vg,4)} unit="m³/kg" />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          Table interpolated from verified reference data (cross-checked against two independent published
+          sources); exact at tabulated pressures, small interpolation error between — well under 1% across
+          the 1–30 bar range most boiler work falls in.
+        </div>
+      </Plate>
+    </div>
+  );
+}
+
 // ================= APP SHELL =================
 const TOOL_CATALOG = [
   {
@@ -3034,13 +4916,21 @@ const TOOL_CATALOG = [
     ],
   },
   {
+    category: "Water Treatment",
+    tools: [
+      { id: "watertreatment", icon: "💧", name: "Sand / Carbon / Softener", desc: "Media sizing, vessel drawing, printable spec sheet" },
+    ],
+  },
+  {
     category: "Boiler Engineering",
     tools: [
       { id: "boiler", icon: "🔥", name: "Combustion, Steam & Draft", desc: "Flue gas, steam table, ID/FD fan sizing" },
       { id: "fuelconsumption", icon: "⛽", name: "Fuel Consumption", desc: "LPG, heavy oil, or biomass fuel rate from steam duty" },
+      { id: "stepgrate", icon: "🪜", name: "Step Grate Hydraulic Timing", desc: "3-zone reciprocating grate push/dwell timing, fixed stroke" },
       { id: "pressuredrop", icon: "📉", name: "System Pressure Drop", desc: "Furnace → boiler → multicyclone → scrubber → duct → stack" },
       { id: "refractory", icon: "🧱", name: "Refractory Lining", desc: "Brick + mortar or castable quantities by area" },
       { id: "insulation", icon: "🧊", name: "Insulation Selection", desc: "Glass/rock wool thickness vs surface temp & density" },
+      { id: "specsheet", icon: "📋", name: "Project Spec Sheet Generator", desc: "Fill a form, print/PDF a full boiler project spec sheet" },
     ],
   },
   {
@@ -3049,6 +4939,8 @@ const TOOL_CATALOG = [
       { id: "steel", icon: "📐", name: "Steel Properties", desc: "Pipe schedule dimensions, plate/channel/beam weights" },
       { id: "unitconv", icon: "🔁", name: "Unit Converter", desc: "Pressure, flow, power, length, mass, temperature" },
       { id: "bolttorque", icon: "🔩", name: "Bolt Torque", desc: "Recommended torque from bolt size, class & friction" },
+      { id: "geometry", icon: "📏", name: "Area / Volume Calculator", desc: "Rectangle, circle, cylinder, sphere, cone, pyramid, etc." },
+      { id: "steamtable", icon: "💦", name: "Steam Table", desc: "Saturated steam lookup by pressure or temperature" },
     ],
   },
   {
@@ -3081,6 +4973,11 @@ function ToolIcon({ id, className }) {
         <path d="M5 4 H19 V10 L15 20 H9 L5 10 Z" />
       </svg>
     );
+    case "watertreatment": return (
+      <svg {...p}>
+        <path d="M12 3 C8 8 5 12 5 15.5 A7 7 0 0 0 19 15.5 C19 12 16 8 12 3 Z" />
+      </svg>
+    );
     case "tank": return (
       <svg {...p}>
         <rect x="2" y="8" width="20" height="8" rx="4" />
@@ -3091,6 +4988,23 @@ function ToolIcon({ id, className }) {
     case "boiler": return (
       <svg {...p}>
         <path d="M12 2 C7 7 6 11 8 15 C9 17.5 12 19 12 19 C12 19 15 17.5 16 15 C18 11 17 7 12 2 Z" />
+      </svg>
+    );
+    case "specsheet": return (
+      <svg {...p}>
+        <rect x="5" y="3" width="14" height="18" rx="1" />
+        <line x1="8" y1="7" x2="16" y2="7" />
+        <line x1="8" y1="11" x2="16" y2="11" />
+        <line x1="8" y1="15" x2="13" y2="15" />
+      </svg>
+    );
+    case "stepgrate": return (
+      <svg {...p}>
+        <line x1="3" y1="7" x2="21" y2="7" />
+        <line x1="3" y1="12" x2="21" y2="12" />
+        <line x1="3" y1="17" x2="21" y2="17" />
+        <path d="M6 4 L9 4 L9 20 L6 20" />
+        <path d="M14 9 L18 9 M16 6 L18 9 L16 12" />
       </svg>
     );
     case "fuelconsumption": return (
@@ -3138,6 +5052,22 @@ function ToolIcon({ id, className }) {
         <path d="M20 16 H6 M10 12 L6 16 L10 20" />
       </svg>
     );
+    case "geometry": return (
+      <svg {...p}>
+        <rect x="3" y="9" width="18" height="6" rx="1" />
+        <line x1="6" y1="9" x2="6" y2="12" />
+        <line x1="9" y1="9" x2="9" y2="12" />
+        <line x1="12" y1="9" x2="12" y2="13" />
+        <line x1="15" y1="9" x2="15" y2="12" />
+        <line x1="18" y1="9" x2="18" y2="12" />
+      </svg>
+    );
+    case "steamtable": return (
+      <svg {...p}>
+        <path d="M12 2 C8 6 6 10 8 14 C9 16.5 12 18 12 18 C12 18 15 16.5 16 14 C18 10 16 6 12 2 Z" />
+        <line x1="6" y1="20" x2="18" y2="20" />
+      </svg>
+    );
     case "bolttorque": return (
       <svg {...p}>
         <path d="M12 3 L19 7 V15 L12 19 L5 15 V7 Z" />
@@ -3165,6 +5095,7 @@ function ToolIcon({ id, className }) {
 const CATEGORY_COLORS = {
   "Conveyor & Material Handling": "text-sky-400 group-hover:border-sky-500",
   "Pressure Vessel": "text-violet-400 group-hover:border-violet-500",
+  "Water Treatment": "text-cyan-400 group-hover:border-cyan-500",
   "Boiler Engineering": "text-orange-400 group-hover:border-orange-500",
   "Reference / Materials": "text-teal-400 group-hover:border-teal-500",
   "Electrical & Instrumentation": "text-amber-400 group-hover:border-amber-500",
@@ -3241,22 +5172,32 @@ function ConveyorSizingCalculator() {
               <SiloHopperPanel />
             ) : tab === "tank" ? (
               <TankVesselPanel />
+            ) : tab === "watertreatment" ? (
+              <WaterTreatmentPanel />
             ) : tab === "boiler" ? (
               <BoilerPanel />
             ) : tab === "fuelconsumption" ? (
               <FuelConsumptionPanel />
+            ) : tab === "stepgrate" ? (
+              <StepGratePanel />
             ) : tab === "pressuredrop" ? (
               <SystemPressureDropPanel />
             ) : tab === "refractory" ? (
               <RefractoryPanel />
             ) : tab === "insulation" ? (
               <InsulationPanel />
+            ) : tab === "specsheet" ? (
+              <SpecSheetPanel />
             ) : tab === "steel" ? (
               <SteelPropertiesPanel />
             ) : tab === "unitconv" ? (
               <UnitConverterPanel />
             ) : tab === "bolttorque" ? (
               <BoltTorquePanel />
+            ) : tab === "geometry" ? (
+              <GeometryCalculator />
+            ) : tab === "steamtable" ? (
+              <SteamTableStandalonePanel />
             ) : tab === "motorcable" ? (
               <MotorCablePanel />
             ) : (

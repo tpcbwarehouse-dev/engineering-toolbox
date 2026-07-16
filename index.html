@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Engineering Toolbox — TPE</title>
+<title>TPE Engineering Toolbox</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
@@ -1903,7 +1903,7 @@ function lerp(a, b, t) { return a + (b - a) * t; }
 
 function steamLookupByPressure(pBar) {
   const t = STEAM_TABLE;
-  const clamp = pBar <= t[0][0] ? 0 : pBar >= t[t.length - 1][0] ? t.length - 2 : null;
+  if (!isFinite(pBar)) pBar = t[0][0]; // NaN/invalid input (e.g. field cleared mid-edit) -> fall back to table minimum instead of crashing
   if (pBar <= t[0][0]) return { T: t[0][1], hf: t[0][2], hg: t[0][3], vg: t[0][4] };
   if (pBar >= t[t.length - 1][0]) { const l = t[t.length - 1]; return { T: l[1], hf: l[2], hg: l[3], vg: l[4] }; }
   for (let i = 0; i < t.length - 1; i++) {
@@ -1912,10 +1912,14 @@ function steamLookupByPressure(pBar) {
       return { T: lerp(t[i][1], t[i + 1][1], f), hf: lerp(t[i][2], t[i + 1][2], f), hg: lerp(t[i][3], t[i + 1][3], f), vg: lerp(t[i][4], t[i + 1][4], f) };
     }
   }
+  // Should be unreachable given the guards above, but never return undefined regardless.
+  const l = t[t.length - 1];
+  return { T: l[1], hf: l[2], hg: l[3], vg: l[4] };
 }
 
 function steamLookupByTemperature(tC) {
   const t = STEAM_TABLE;
+  if (!isFinite(tC)) tC = t[0][1]; // NaN/invalid input -> fall back to table minimum instead of crashing
   if (tC <= t[0][1]) return { P: t[0][0], hf: t[0][2], hg: t[0][3], vg: t[0][4] };
   if (tC >= t[t.length - 1][1]) { const l = t[t.length - 1]; return { P: l[0], hf: l[2], hg: l[3], vg: l[4] }; }
   for (let i = 0; i < t.length - 1; i++) {
@@ -1924,6 +1928,8 @@ function steamLookupByTemperature(tC) {
       return { P: lerp(t[i][0], t[i + 1][0], f), hf: lerp(t[i][2], t[i + 1][2], f), hg: lerp(t[i][3], t[i + 1][3], f), vg: lerp(t[i][4], t[i + 1][4], f) };
     }
   }
+  const l = t[t.length - 1];
+  return { P: l[0], hf: l[2], hg: l[3], vg: l[4] };
 }
 
 // Combustion & flue gas — rigorous molar balance from as-fired ultimate analysis (mass % incl. moisture/ash).
@@ -3419,7 +3425,7 @@ function WaterTankDrawing({ diameter_mm, freeboard_mm, layers, headType, filterT
 
         {bandRects.map((b, i) => (
           <text key={i} x={right + 8} y={b.y + b.h / 2 + 3} fontSize="8.5" fill="#9aa0a8" fontFamily="monospace">
-            {b.label} ({fmt(b.depth,0)}mm)
+            {b.label || "(unnamed layer)"} ({fmt(b.depth,0)}mm)
           </text>
         ))}
 
@@ -3475,7 +3481,7 @@ function WaterTreatmentPanel() {
     return [{ id: Math.random().toString(36).slice(2), label: "Support gravel", brand: "", model: "", mode: "depth", value: 150 }];
   }
   const [mediaLayers, setMediaLayers] = useState(defaultExtraLayers("sand"));
-  const addMediaLayer = () => setMediaLayers([...mediaLayers, { id: Math.random().toString(36).slice(2), label: "", brand: "", model: "", mode: "depth", value: 100 }]);
+  const addMediaLayer = () => setMediaLayers([...mediaLayers, { id: Math.random().toString(36).slice(2), label: `New layer ${mediaLayers.length + 1}`, brand: "", model: "", mode: "depth", value: 100 }]);
   const removeMediaLayer = (id) => setMediaLayers(mediaLayers.filter(l => l.id !== id));
   const updateMediaLayer = (id, field, val) => setMediaLayers(mediaLayers.map(l => (l.id === id ? { ...l, [field]: val } : l)));
 
@@ -3551,23 +3557,34 @@ function WaterTreatmentPanel() {
 
   // Unified layer stack: primary media (depth fixed by process sizing) + user's free-form additional layers.
   // volume(L) = area(m2) x depth(mm) -- a convenient identity (1 m2 x 1mm = 1 liter).
-  const LAYER_PALETTE = ["#8a6d3b", "#5a5347", "#c47a3d", "#2b2b2b", "#4a6b5a", "#6b4a6b", "#6b5a4a"];
+  const PRIMARY_LAYER_COLOR = "#c9a24d"; // fixed amber/gold for the primary media bed, distinct from every extra-layer color below
+  const EXTRA_LAYER_PALETTE = ["#3b6b8a", "#4a8a5a", "#8a3b6b", "#2b2b2b", "#5a3b8a", "#8a5a3b", "#3b8a7a"];
+  // Section 2's bed depth is the TOTAL depth of all filter media combined. Layers added in Section 3 are a
+  // breakdown *within* that total (e.g. "of this 600mm, 200mm is support gravel") — they must not exceed it.
+  // Whatever isn't explicitly broken out is treated as the primary media itself.
   const allLayers = useMemo(() => {
-    const primary = {
-      id: "primary", label: process.primaryLabel, brand: primaryBrand, model: primaryModel,
-      depth_mm: process.primaryDepth, volume_L: process.area * process.primaryDepth, isPrimary: true,
-    };
-    const extras = mediaLayers.map((l) => {
+    const extras = mediaLayers.map((l, i) => {
       const depth_mm = l.mode === "depth" ? l.value : (process.area > 0 ? l.value / process.area : 0);
       const volume_L = l.mode === "volume" ? l.value : process.area * l.value;
-      return { ...l, depth_mm, volume_L };
+      return { ...l, depth_mm, volume_L, fill: EXTRA_LAYER_PALETTE[i % EXTRA_LAYER_PALETTE.length] };
     });
-    return [primary, ...extras].map((l, i) => ({ ...l, fill: LAYER_PALETTE[i % LAYER_PALETTE.length] }));
+    const extrasDepthSum = extras.reduce((s, l) => s + l.depth_mm, 0);
+    const remaining = process.primaryDepth - extrasDepthSum;
+    const exceeds = remaining < -0.01;
+    const primary = remaining > 0.01
+      ? {
+          id: "primary", label: `${process.primaryLabel} (remaining)`, brand: primaryBrand, model: primaryModel,
+          depth_mm: remaining, volume_L: process.area * remaining, isPrimary: true, fill: PRIMARY_LAYER_COLOR,
+        }
+      : null;
+    const layers = primary ? [primary, ...extras] : extras;
+    const totalDepth = layers.reduce((s, l) => s + l.depth_mm, 0);
+    return { layers, totalDepth, exceeds, overBy: exceeds ? extrasDepthSum - process.primaryDepth : 0 };
   }, [process, primaryBrand, primaryModel, mediaLayers]);
 
   const mechanical = useMemo(() => {
     const D_mm = process.diameter_mm;
-    const straightHeight_mm = process.freeboard_mm + allLayers.reduce((s, l) => s + l.depth_mm, 0) + underdrainSpace;
+    const straightHeight_mm = process.freeboard_mm + allLayers.totalDepth + underdrainSpace;
     const headDepth_mm = headType === "Flat" ? 0 : D_mm / 4;
     const overallHeight_mm = straightHeight_mm + 2 * headDepth_mm + legHeight;
     const pipeSize_mm = suggestPipeSizeMm(flow, pipeVelocity);
@@ -3600,7 +3617,7 @@ function WaterTreatmentPanel() {
         <StickyResults items={[
           { label: "Vessel ⌀", value: fmt(process.diameter_mm,0), unit: "mm" },
           { label: "Overall height", value: fmt(mechanical.overallHeight_mm,0), unit: "mm" },
-          { label: "Primary media", value: fmt(allLayers[0].volume_L,0), unit: "L" },
+          { label: "Total bed depth (all layers)", value: fmt(allLayers.totalDepth,0), unit: "mm", warn: allLayers.exceeds },
         ]} />
 
         <Plate title="Filter type">
@@ -3682,9 +3699,35 @@ function WaterTreatmentPanel() {
 
         <Plate title="3. Media Layers (BOQ)">
           <div className="text-[10px] text-neutral-500 mb-2 leading-relaxed">
-            The primary media depth above sets the vessel diameter. Layers here (support gravel, extra media,
-            multi-bed stacks) sit below it and don't affect sizing.
+            The bed depth entered in Section 2 is the TOTAL depth of all filter media combined — not just the
+            top layer. Use the rows below to break that total down into named layers (e.g. support gravel,
+            anthracite cap, garnet). Whatever depth you don't explicitly break out is automatically treated as
+            the primary {process.primaryLabel.toLowerCase()} itself, shown as "(remaining)" below. Layers here
+            must not add up to more than the Section 2 total.
           </div>
+          <div className={`border rounded p-2 mb-3 bg-neutral-900/50 ${allLayers.exceeds ? "border-red-800" : "border-neutral-800"}`}>
+            <div className="flex justify-between text-xs text-neutral-300 py-0.5 border-b border-neutral-800 pb-1 mb-1">
+              <span>Total bed depth (Section 2 input)</span>
+              <span className="font-mono">{fmt(process.primaryDepth,0)} mm</span>
+            </div>
+            {allLayers.layers.map((l, i) => (
+              <div key={l.id || i} className="flex justify-between text-xs text-neutral-300 py-0.5">
+                <span>{l.label || "(unnamed layer)"}{l.isPrimary ? "" : ""}</span>
+                <span className="font-mono">{fmt(l.depth_mm,0)} mm</span>
+              </div>
+            ))}
+            <div className={`flex justify-between text-xs font-bold pt-1 mt-1 border-t border-neutral-700 ${allLayers.exceeds ? "text-red-400" : "text-amber-400"}`}>
+              <span>Sum of layers</span>
+              <span className="font-mono">{fmt(allLayers.totalDepth,0)} mm</span>
+            </div>
+          </div>
+          {allLayers.exceeds && (
+            <div className="text-[11px] text-red-400 bg-red-950/30 border border-red-900 rounded px-2 py-1.5 mb-3">
+              Layers add up to {fmt(allLayers.overBy,0)} mm more than the Section 2 total bed depth
+              ({fmt(process.primaryDepth,0)} mm) — either reduce the layer depths below, or increase the bed
+              depth in Section 2 to match.
+            </div>
+          )}
           {mediaLayers.map((l) => (
             <div key={l.id} className="border border-neutral-800 rounded p-2 mb-2 relative">
               <button onClick={() => removeMediaLayer(l.id)} className="absolute top-1 right-1 text-neutral-500 hover:text-red-400 text-xs px-1">✕</button>
@@ -3743,11 +3786,11 @@ function WaterTreatmentPanel() {
         </Plate>
 
         <Plate title="Rough vessel drawing">
-          <WaterTankDrawing diameter_mm={process.diameter_mm} freeboard_mm={process.freeboard_mm} layers={allLayers.map(l => ({ label: l.label, depth: l.depth_mm, fill: l.fill }))} headType={headType} filterType={filterLabel} />
+          <WaterTankDrawing diameter_mm={process.diameter_mm} freeboard_mm={process.freeboard_mm} layers={allLayers.layers.map(l => ({ label: l.label, depth: l.depth_mm, fill: l.fill }))} headType={headType} filterType={filterLabel} />
         </Plate>
 
         <Plate title="Media layers (computed)">
-          {allLayers.map((l, i) => (
+          {allLayers.layers.map((l, i) => (
             <div key={i} className="flex items-center justify-between py-1.5 border-b border-neutral-800 last:border-0">
               <div>
                 <div className="text-xs font-semibold text-neutral-200">{l.label}{l.isPrimary ? <span className="text-amber-500"> (primary)</span> : ""}</div>
@@ -3812,7 +3855,7 @@ function WaterTreatmentPanel() {
         <div className="print-section">
           <div className="font-bold text-sm mb-1 mt-3">GENERAL ARRANGEMENT</div>
           <div style={{ maxWidth: "420px", margin: "0 auto" }}>
-            <WaterTankDrawing diameter_mm={process.diameter_mm} freeboard_mm={process.freeboard_mm} layers={allLayers.map(l => ({ label: l.label, depth: l.depth_mm, fill: l.fill }))} headType={headType} filterType={filterLabel} />
+            <WaterTankDrawing diameter_mm={process.diameter_mm} freeboard_mm={process.freeboard_mm} layers={allLayers.layers.map(l => ({ label: l.label, depth: l.depth_mm, fill: l.fill }))} headType={headType} filterType={filterLabel} />
           </div>
         </div>
 
@@ -3860,7 +3903,7 @@ function WaterTreatmentPanel() {
               </tr>
             </thead>
             <tbody>
-              {allLayers.map((l, i) => (
+              {allLayers.layers.map((l, i) => (
                 <tr key={i}>
                   <td className="border border-black px-2 py-1">{l.label}{l.isPrimary ? " (primary)" : ""}</td>
                   <td className="border border-black px-2 py-1">{l.brand}</td>
@@ -6723,7 +6766,7 @@ function ToolboxHome({ onSelect, lang, onToggleLang }) {
   return (
     <div>
       <div className="mb-4 flex items-center justify-center gap-3">
-        <h1 className="text-base font-bold text-neutral-50 tracking-tight">Engineering Toolbox</h1>
+        <h1 className="text-base font-bold text-neutral-50 tracking-tight">TPE Engineering Toolbox</h1>
         <button onClick={onToggleLang} className="px-2 py-0.5 rounded text-[10px] font-bold border border-neutral-700 text-neutral-400 hover:border-amber-500 hover:text-amber-400">
           {lang === "th" ? "TH | en" : "th | EN"}
         </button>
@@ -6757,6 +6800,40 @@ function ToolboxHome({ onSelect, lang, onToggleLang }) {
       </div>
     </div>
   );
+}
+
+// ================= ERROR BOUNDARY (safety net) =================
+// Catches any uncaught render error anywhere in the tree (e.g. a bad calculation
+// on unexpected input) and shows a recoverable message instead of a blank screen.
+class ToolboxErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, message: error?.message || String(error) };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight: "100vh", background: "#0a0a0a", color: "#e5e5e5", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "sans-serif" }}>
+          <div style={{ maxWidth: 420, textAlign: "center" }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Something went wrong in this tool</div>
+            <div style={{ fontSize: 12, color: "#a3a3a3", marginBottom: 16, lineHeight: 1.5 }}>
+              Usually this happens when a number field was left empty or set to an unusual value. Your other
+              tabs and data elsewhere are unaffected — reloading only resets this session.
+            </div>
+            <div style={{ fontSize: 10, color: "#737373", marginBottom: 16, fontFamily: "monospace", wordBreak: "break-word" }}>{this.state.message}</div>
+            <button onClick={() => window.location.reload()} style={{ background: "#d97706", color: "#0a0a0a", fontWeight: 700, padding: "10px 20px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 13 }}>
+              Reload Toolbox
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 function ConveyorSizingCalculator() {
@@ -6849,7 +6926,7 @@ function ConveyorSizingCalculator() {
 
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(React.createElement(ConveyorSizingCalculator));
+root.render(React.createElement(ToolboxErrorBoundary, null, React.createElement(ConveyorSizingCalculator)));
 </script>
 </body>
 </html>

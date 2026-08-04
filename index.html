@@ -441,6 +441,13 @@ const TH = {
   "Fixed day (from project start)": "วันที่ (นับจากเริ่มโปรเจ็ค)",
   "1. Copy schedule": "1. คัดลอกแผนงาน",
   "2. Open blank Google Sheet ↗": "2. เปิด Google Sheet เปล่า ↗",
+  "💾 Save File": "💾 บันทึกไฟล์",
+  "Search tools…": "ค้นหาเครื่องมือ…",
+  "No tools match your search.": "ไม่พบเครื่องมือที่ตรงกับคำค้นหา",
+  "📂 Load File": "📂 โหลดไฟล์",
+  "Saved.": "บันทึกแล้ว",
+  "Loaded — you can keep editing.": "โหลดแล้ว — แก้ไขต่อได้เลย",
+  "Couldn't read that file — is it a valid saved file from this tool?": "อ่านไฟล์นี้ไม่ได้ — ไฟล์นี้บันทึกจากเครื่องมือนี้หรือไม่?",
 };
 
 function tr(s) {
@@ -478,7 +485,7 @@ function Select({ label, value, onChange, options }) {
         className="w-full bg-neutral-900 border border-neutral-700 focus:border-amber-500 focus:outline-none rounded px-3 py-2 text-neutral-100 font-mono text-sm"
       >
         {options.map((o) => (
-          <option key={o.label} value={o.label}>{o.label}</option>
+          <option key={o.value ?? o.label} value={o.value ?? o.label}>{o.label}</option>
         ))}
       </select>
     </label>
@@ -535,6 +542,77 @@ function StickyResults({ items }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+// Generic save-to-file / load-from-file bar. `onSave` returns a plain-object snapshot of the
+// panel's state; `onLoad` receives the parsed object back and should call the panel's setters
+// to restore it. Used so a spec sheet / schedule can be saved as a .json file and reopened later
+// to keep editing, without needing any server or account.
+function SaveLoadBar({ onSave, onLoad, filename }) {
+  const fileInputRef = React.useRef(null);
+  const [status, setStatus] = useState("");
+
+  const flashStatus = (msg) => {
+    setStatus(msg);
+    setTimeout(() => setStatus(""), 4000);
+  };
+
+  const handleSaveClick = () => {
+    try {
+      const data = onSave();
+      const payload = { __tool: filename, __savedAt: new Date().toISOString(), data };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `${filename}_${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      flashStatus(tr("Saved."));
+    } catch (e) {
+      flashStatus(tr("Couldn't read that file — is it a valid saved file from this tool?"));
+    }
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        const data = parsed && parsed.data ? parsed.data : parsed; // tolerate raw or wrapped JSON
+        onLoad(data);
+        flashStatus(tr("Loaded — you can keep editing."));
+      } catch (err) {
+        flashStatus(tr("Couldn't read that file — is it a valid saved file from this tool?"));
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ""; // reset so re-selecting the same file still fires onChange
+  };
+
+  return (
+    <div className="no-print flex flex-wrap items-center gap-2 mb-3">
+      <button
+        onClick={handleSaveClick}
+        className="px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide bg-sky-700 text-white hover:bg-sky-600"
+      >
+        {tr("💾 Save File")}
+      </button>
+      <button
+        onClick={() => fileInputRef.current && fileInputRef.current.click()}
+        className="px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-sky-500 hover:text-sky-400"
+      >
+        {tr("📂 Load File")}
+      </button>
+      <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={handleFileChange} className="hidden" />
+      {status && <span className="text-[11px] text-neutral-400">{status}</span>}
     </div>
   );
 }
@@ -1433,9 +1511,57 @@ function TankVesselPanel() {
   const removeComponent = (i) => setComponents(components.filter((_, idx) => idx !== i));
   const updateComponent = (i, field, val) => setComponents(components.map((c, idx) => (idx === i ? { ...c, [field]: val } : c)));
 
+  // ---- save / load whole spec sheet as a .json file ----
+  const saveTankSnapshot = () => ({
+    tag, service, description, docNo, rev,
+    idMm, tanTanMm, sfPerHead,
+    headAType, headARatio, headATorisL, headATorisR, headAFlatC,
+    headBType, headBRatio, headBTorisL, headBTorisR, headBFlatC,
+    designPBar, designTempC, materialLabel, customS, jointLabel, caMm,
+    shellNomMm, headANomMm, headBNomMm,
+    nozzles, surfacePrep, primer, topcoat, paintColor, components,
+  });
+  const loadTankSnapshot = (d) => {
+    if (!d) return;
+    if (d.tag !== undefined) setTag(d.tag);
+    if (d.service !== undefined) setService(d.service);
+    if (d.description !== undefined) setDescription(d.description);
+    if (d.docNo !== undefined) setDocNo(d.docNo);
+    if (d.rev !== undefined) setRev(d.rev);
+    if (d.idMm !== undefined) setIdMm(d.idMm);
+    if (d.tanTanMm !== undefined) setTanTanMm(d.tanTanMm);
+    if (d.sfPerHead !== undefined) setSfPerHead(d.sfPerHead);
+    if (d.headAType !== undefined) setHeadAType(d.headAType);
+    if (d.headARatio !== undefined) setHeadARatio(d.headARatio);
+    if (d.headATorisL !== undefined) setHeadATorisL(d.headATorisL);
+    if (d.headATorisR !== undefined) setHeadATorisR(d.headATorisR);
+    if (d.headAFlatC !== undefined) setHeadAFlatC(d.headAFlatC);
+    if (d.headBType !== undefined) setHeadBType(d.headBType);
+    if (d.headBRatio !== undefined) setHeadBRatio(d.headBRatio);
+    if (d.headBTorisL !== undefined) setHeadBTorisL(d.headBTorisL);
+    if (d.headBTorisR !== undefined) setHeadBTorisR(d.headBTorisR);
+    if (d.headBFlatC !== undefined) setHeadBFlatC(d.headBFlatC);
+    if (d.designPBar !== undefined) setDesignPBar(d.designPBar);
+    if (d.designTempC !== undefined) setDesignTempC(d.designTempC);
+    if (d.materialLabel !== undefined) setMaterialLabel(d.materialLabel);
+    if (d.customS !== undefined) setCustomS(d.customS);
+    if (d.jointLabel !== undefined) setJointLabel(d.jointLabel);
+    if (d.caMm !== undefined) setCaMm(d.caMm);
+    if (d.shellNomMm !== undefined) setShellNomMm(d.shellNomMm);
+    if (d.headANomMm !== undefined) setHeadANomMm(d.headANomMm);
+    if (d.headBNomMm !== undefined) setHeadBNomMm(d.headBNomMm);
+    if (d.nozzles !== undefined) setNozzles(d.nozzles);
+    if (d.surfacePrep !== undefined) setSurfacePrep(d.surfacePrep);
+    if (d.primer !== undefined) setPrimer(d.primer);
+    if (d.topcoat !== undefined) setTopcoat(d.topcoat);
+    if (d.paintColor !== undefined) setPaintColor(d.paintColor);
+    if (d.components !== undefined) setComponents(d.components);
+  };
+
   const S = materialLabel === "Custom…" ? customS : MATERIAL_PRESETS.find(m => m.label === materialLabel)?.S ?? customS;
   const E = JOINT_EFFICIENCIES.find(j => j.label === jointLabel)?.E ?? 1.0;
   const P_MPa = designPBar * 0.1;
+  const isAtmospheric = designPBar <= 0; // atmospheric/vented tank — MAWP is a construction check, not an operating rating
 
   const calc = useMemo(() => {
     const D_m = idMm / 1000;
@@ -1460,7 +1586,7 @@ function TankVesselPanel() {
     const mawp_headA = headMawp(headAType, tc_headA, S, E, idMm, headARatio, headATorisL, headAFlatC) * 10;
     const mawp_headB = headMawp(headBType, tc_headB, S, E, idMm, headBRatio, headBTorisL, headBFlatC) * 10;
     const mawp_governing = Math.min(mawp_shell, mawp_headA, mawp_headB);
-    const hydrotest_bar = 1.3 * mawp_governing;
+    const hydrotest_bar = 1.5 * designPBar;
 
     return {
       V_shell, headA, headB, V_total, liters, usGal, ukGal, OAL_mm,
@@ -1469,7 +1595,7 @@ function TankVesselPanel() {
     };
   }, [idMm, tanTanMm, sfPerHead, headAType, headARatio, headATorisL, headATorisR, headAFlatC,
       headBType, headBRatio, headBTorisL, headBTorisR, headBFlatC, S, E, P_MPa, caMm,
-      shellNomMm, headANomMm, headBNomMm]);
+      shellNomMm, headANomMm, headBNomMm, designPBar]);
 
   const shellOk = shellNomMm >= calc.t_shell_req;
   const headAOk = headANomMm >= calc.t_headA_req;
@@ -1489,7 +1615,8 @@ function TankVesselPanel() {
         .print-sheet { display: none; }
       `}</style>
 
-      <div className="no-print flex justify-end mb-3">
+      <div className="no-print flex flex-wrap justify-end gap-2 mb-3">
+        <SaveLoadBar onSave={saveTankSnapshot} onLoad={loadTankSnapshot} filename={`tank_${tag || "spec"}`} />
         <button
           onClick={() => window.print()}
           className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wide bg-emerald-600 text-white hover:bg-emerald-500"
@@ -1501,7 +1628,7 @@ function TankVesselPanel() {
       <div className="no-print">
         <StickyResults items={[
           { label: "Volume", value: fmt(calc.V_total,2), unit: "m³" },
-          { label: "MAWP", value: fmt(calc.mawp_governing,2), unit: "barg" },
+          { label: isAtmospheric ? "MAWP (ref. only)" : "MAWP", value: fmt(calc.mawp_governing,2), unit: "barg" },
           { label: "Shell t", value: fmt(shellNomMm,1), unit: "mm", warn: !shellOk },
         ]} />
 
@@ -1621,14 +1748,22 @@ function TankVesselPanel() {
         </Plate>
 
         <Plate title="MAWP check (at nominal thickness)">
+          {isAtmospheric && (
+            <div className="text-[10px] text-amber-400 bg-amber-950/30 border border-amber-900 rounded px-2 py-1.5 mb-2 leading-relaxed">
+              Design pressure is atmospheric (0 barg). The MAWP figures below are the calculated pressure
+              capacity of the current shell/head thicknesses — not the operating condition — and are kept
+              here for reference only. The printed datasheet shows "Atmospheric (vented)" instead of a MAWP
+              value to avoid implying the tank is pressure-rated.
+            </div>
+          )}
           <Readout label="Shell MAWP" value={fmt(calc.mawp_shell,2)} unit="barg" />
           <Readout label="Head A MAWP" value={fmt(calc.mawp_headA,2)} unit="barg" />
           <Readout label="Head B MAWP" value={fmt(calc.mawp_headB,2)} unit="barg" />
           <Readout label="Governing MAWP" value={fmt(calc.mawp_governing,2)} unit="barg" big />
-          <Readout label="Hydrotest pressure (≈1.3×MAWP)" value={fmt(calc.hydrotest_bar,2)} unit="barg" />
+          <Readout label="Hydrotest pressure (1.5×design P)" value={fmt(calc.hydrotest_bar,2)} unit="barg" />
           <div className="text-[10px] text-neutral-500 mt-2 leading-relaxed">
-            Hydrotest figure is a simplified 1.3×MAWP per UG-99(b); the exact value should also apply the
-            stress ratio between test and design temperature if they differ materially.
+            Hydrotest pressure is taken as 1.5×design pressure (a common shop/spec basis) rather than
+            derived from governing MAWP.
           </div>
           <div className="text-[10px] text-sky-400 bg-sky-950/30 border border-sky-900 rounded px-2 py-1.5 mt-2 leading-relaxed">
             Print / Save as PDF now produces two documents in one file: the vessel datasheet (page 1) followed
@@ -1668,7 +1803,7 @@ function TankVesselPanel() {
             <tr><td className="border border-black px-2 py-1 font-bold">Material</td><td className="border border-black px-2 py-1">{materialLabel} (S={fmt(S,0)} MPa)</td>
                 <td className="border border-black px-2 py-1 font-bold">Joint Efficiency</td><td className="border border-black px-2 py-1">{jointLabel}</td></tr>
             <tr><td className="border border-black px-2 py-1 font-bold">Corrosion Allowance</td><td className="border border-black px-2 py-1">{fmt(caMm,1)} mm</td>
-                <td className="border border-black px-2 py-1 font-bold">Governing MAWP</td><td className="border border-black px-2 py-1">{fmt(calc.mawp_governing,2)} barg</td></tr>
+                <td className="border border-black px-2 py-1 font-bold">Governing MAWP</td><td className="border border-black px-2 py-1">{isAtmospheric ? "Atmospheric (vented)" : `${fmt(calc.mawp_governing,2)} barg`}</td></tr>
             <tr><td className="border border-black px-2 py-1 font-bold">Hydrotest Pressure</td><td className="border border-black px-2 py-1">{fmt(calc.hydrotest_bar,2)} barg</td>
                 <td className="border border-black px-2 py-1 font-bold">Total Volume</td><td className="border border-black px-2 py-1">{fmt(calc.V_total,2)} m³ ({fmt(calc.liters,0)} L)</td></tr>
           </tbody>
@@ -1830,12 +1965,12 @@ function TankVesselPanel() {
           </div>
 
           <div className="print-section">
-            <div className="font-bold text-sm mb-1">6. HYDROSTATIC TEST PRESSURE — UG-99(b)</div>
+            <div className="font-bold text-sm mb-1">6. HYDROSTATIC TEST PRESSURE</div>
             <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
               <tbody>
-                <tr><td className="border border-black px-2 py-1 font-bold w-1/3">Formula</td><td className="border border-black px-2 py-1 font-mono">P_test = 1.3 × MAWP × (S_test / S_design)</td></tr>
-                <tr><td className="border border-black px-2 py-1 font-bold">Stress ratio</td><td className="border border-black px-2 py-1">S_test / S_design taken as 1.0 (allowable stress at test temperature assumed equal to design — confirm from Sec. II-D if design temp is elevated)</td></tr>
-                <tr><td className="border border-black px-2 py-1 font-bold">Test pressure</td><td className="border border-black px-2 py-1 font-mono">P_test = 1.3 × {fmt(calc.mawp_governing,2)} × 1.0 = <b>{fmt(calc.hydrotest_bar,2)} barg</b> (minimum, at top of vessel)</td></tr>
+                <tr><td className="border border-black px-2 py-1 font-bold w-1/3">Formula</td><td className="border border-black px-2 py-1 font-mono">P_test = 1.5 × P_design</td></tr>
+                <tr><td className="border border-black px-2 py-1 font-bold">Basis</td><td className="border border-black px-2 py-1">Test pressure taken as 1.5× design pressure. Governing MAWP is shown above for reference/verification only and does not set the test pressure.</td></tr>
+                <tr><td className="border border-black px-2 py-1 font-bold">Test pressure</td><td className="border border-black px-2 py-1 font-mono">P_test = 1.5 × {fmt(designPBar,2)} = <b>{fmt(calc.hydrotest_bar,2)} barg</b> (minimum, at top of vessel)</td></tr>
               </tbody>
             </table>
           </div>
@@ -2154,6 +2289,378 @@ function BoilerPanel() {
   );
 }
 
+// ================= BOILER EFFICIENCY HELPERS =================
+// Saturation vapor pressure of water (Tetens formula, kPa, T in °C) — accurate to ~0.1% over 0-50°C.
+// Shared by the Boiler Efficiency (combustion air humidity), Flow Converter and Psychrometric panels.
+function satVaporPressureKPa(tC) {
+  return 0.61094 * Math.exp((17.625 * tC) / (tC + 243.04));
+}
+
+// ASME PTC 4 / BS 845 / JIS B8222 all use the same "heat loss method" structure (losses expressed
+// as %age of fuel heating value, efficiency = 100 - sum of losses); they differ mainly in whether
+// GCV(HHV) or NCV(LHV) is the default reference basis and some minor loss-item groupings. Here the
+// heating value the user enters is used as-is as the % basis, so the same calc serves all three —
+// the "Heating value basis" toggle is a label only, to keep the report honest about which was used.
+function boilerIndirectLosses({ mDryFlueGas, Cpfg, Tfg, Tamb, Hpct, Mpct, AAS, airHumidity, unburntPct, radiationPct, unaccountedPct, HV }) {
+  const dT = Tfg - Tamb;
+  const L1 = (mDryFlueGas * Cpfg * dT / HV) * 100; // dry flue gas
+  const L2 = (9 * (Hpct / 100) * (2442 + 2.0 * dT) / HV) * 100; // H2 in fuel -> moisture formed
+  const L3 = ((Mpct / 100) * (2442 + 2.0 * dT) / HV) * 100; // moisture in fuel
+  const L4 = (AAS * airHumidity * 2.0 * dT / HV) * 100; // moisture carried in with combustion air
+  const L5 = unburntPct; // unburnt combustibles in ash (direct input — needs ash sampling to derive rigorously)
+  const L6 = radiationPct; // radiation & convection (surface loss, direct input)
+  const L7 = unaccountedPct; // unaccounted-for losses (margin, direct input)
+  const total = L1 + L2 + L3 + L4 + L5 + L6 + L7;
+  return { L1, L2, L3, L4, L5, L6, L7, total, efficiency: 100 - total };
+}
+
+// ================= BOILER EFFICIENCY PANEL =================
+function BoilerEfficiencyPanel() {
+  const [method, setMethod] = useState("indirect"); // 'indirect' | 'direct'
+  const [hvBasis, setHvBasis] = useState("GCV"); // 'GCV' | 'NCV' — label only, see note above
+
+  // shared fuel ultimate analysis (as-fired, wt%) — same convention as the Combustion panel
+  const [Cpct, setCpct] = useState(28);
+  const [Hpct, setHpct] = useState(3.4);
+  const [Opct, setOpct] = useState(22.6);
+  const [Npct, setNpct] = useState(0.3);
+  const [Spct, setSpct] = useState(0.03);
+  const [Mpct, setMpct] = useState(35);
+  const [HV, setHV] = useState(9200); // kJ/kg — typical as-fired biomass; override with your actual fuel value
+
+  const [combMode, setCombMode] = useState("givenEA");
+  const [eaPct, setEaPct] = useState(30);
+  const [measuredO2, setMeasuredO2] = useState(6);
+
+  const [flueGasTempC, setFlueGasTempC] = useState(180);
+  const [ambientTempC, setAmbientTempC] = useState(33);
+  const [ambientRH, setAmbientRH] = useState(60);
+  const [unburntPct, setUnburntPct] = useState(1.0);
+  const [radiationPct, setRadiationPct] = useState(2.0);
+  const [unaccountedPct, setUnaccountedPct] = useState(1.0);
+
+  // direct method inputs
+  const [steamFlowKgHr, setSteamFlowKgHr] = useState(5000);
+  const [steamPBarg, setSteamPBarg] = useState(10);
+  const [feedwaterTempC, setFeedwaterTempC] = useState(80);
+  const [fuelFlowKgHr, setFuelFlowKgHr] = useState(1200);
+
+  const ashPct = 100 - (Cpct + Hpct + Opct + Npct + Spct + Mpct);
+
+  const comb = useMemo(() => {
+    const EA = combMode === "givenEA" ? eaPct / 100 : solveEAfromO2(Cpct, Hpct, Opct, Npct, Spct, Mpct, measuredO2);
+    return { ...combustionCalc(Cpct, Hpct, Opct, Npct, Spct, Mpct, EA), EA };
+  }, [Cpct, Hpct, Opct, Npct, Spct, Mpct, combMode, eaPct, measuredO2]);
+
+  const airHumidity = useMemo(() => {
+    const Psat = satVaporPressureKPa(ambientTempC);
+    const Pw = (ambientRH / 100) * Psat;
+    return 0.622 * Pw / (101.325 - Pw); // kg water / kg dry air
+  }, [ambientTempC, ambientRH]);
+
+  const indirect = useMemo(() => {
+    const mDryFlueGas = comb.flueGasMass * (1 - comb.H2Opct_wet / 100);
+    return boilerIndirectLosses({
+      mDryFlueGas, Cpfg: 1.005, Tfg: flueGasTempC, Tamb: ambientTempC,
+      Hpct, Mpct, AAS: comb.Aactual, airHumidity, unburntPct, radiationPct, unaccountedPct, HV,
+    });
+  }, [comb, flueGasTempC, ambientTempC, Hpct, Mpct, airHumidity, unburntPct, radiationPct, unaccountedPct, HV]);
+
+  const direct = useMemo(() => {
+    const pBarA = steamPBarg + 1.01325;
+    const s = steamLookupByPressure(pBarA);
+    const hfeed = feedwaterTempC * 4.186;
+    const heatOutput_kJhr = steamFlowKgHr * (s.hg - hfeed);
+    const heatInput_kJhr = fuelFlowKgHr * HV;
+    const efficiency = heatInput_kJhr > 0 ? (heatOutput_kJhr / heatInput_kJhr) * 100 : 0;
+    return { pBarA, Tsat: s.T, hg: s.hg, hfeed, heatOutput_kJhr, heatInput_kJhr, efficiency,
+      equivEvap: fuelFlowKgHr > 0 ? steamFlowKgHr / fuelFlowKgHr : 0 };
+  }, [steamFlowKgHr, steamPBarg, feedwaterTempC, fuelFlowKgHr, HV]);
+
+  return (
+    <div>
+      <StickyResults items={
+        method === "indirect"
+          ? [
+              { label: "Efficiency (indirect)", value: fmt(indirect.efficiency,2), unit: "%", warn: indirect.efficiency < 60 },
+              { label: "Total losses", value: fmt(indirect.total,2), unit: "%" },
+            ]
+          : [
+              { label: "Efficiency (direct)", value: fmt(direct.efficiency,2), unit: "%", warn: direct.efficiency < 60 },
+              { label: "Equiv. evaporation", value: fmt(direct.equivEvap,2), unit: "kg steam/kg fuel" },
+            ]
+      } />
+
+      <Plate title="Method">
+        <div className="grid grid-cols-2 gap-2 mb-1">
+          <button onClick={() => setMethod("indirect")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${method === "indirect" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Indirect (heat loss)</button>
+          <button onClick={() => setMethod("direct")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${method === "direct" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Direct (input/output)</button>
+        </div>
+        <Select label="Heating value basis (label only)" value={hvBasis} onChange={setHvBasis} options={[{ label: "GCV" }, { label: "NCV" }]} />
+        <Field label={`Heating value (${hvBasis})`} unit="kJ/kg" step="10" value={HV} onChange={setHV} hint="Enter as-fired GCV or NCV per your lab report; the calc uses whichever you enter." />
+      </Plate>
+
+      {method === "indirect" ? (
+        <>
+          <Plate title="Fuel ultimate analysis (as-fired, wt%)">
+            <div className="grid grid-cols-3 gap-x-2">
+              <Field label="C" unit="%" step="0.1" value={Cpct} onChange={setCpct} />
+              <Field label="H" unit="%" step="0.1" value={Hpct} onChange={setHpct} />
+              <Field label="O" unit="%" step="0.1" value={Opct} onChange={setOpct} />
+            </div>
+            <div className="grid grid-cols-3 gap-x-2">
+              <Field label="N" unit="%" step="0.01" value={Npct} onChange={setNpct} />
+              <Field label="S" unit="%" step="0.01" value={Spct} onChange={setSpct} />
+              <Field label="Moisture" unit="%" step="0.1" value={Mpct} onChange={setMpct} />
+            </div>
+            <Readout label="Ash (remainder)" value={fmt(ashPct,2)} unit="%" />
+          </Plate>
+
+          <Plate title="Excess air / O2">
+            <div className="flex gap-2 mb-3">
+              <button onClick={() => setCombMode("givenEA")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${combMode === "givenEA" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Given excess air %</button>
+              <button onClick={() => setCombMode("givenO2")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${combMode === "givenO2" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Given measured O2%</button>
+            </div>
+            {combMode === "givenEA" ? (
+              <Field label="Excess air" unit="%" step="1" value={eaPct} onChange={setEaPct} />
+            ) : (
+              <Field label="Measured O2 (dry flue gas)" unit="%" step="0.1" value={measuredO2} onChange={setMeasuredO2} />
+            )}
+            <Readout label="Excess air (solved)" value={fmt(comb.EA*100,1)} unit="%" />
+            <Readout label="O2 in flue gas" value={fmt(comb.O2pct,2)} unit="%" />
+          </Plate>
+
+          <Plate title="Temperatures & ambient air">
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Flue gas temperature" unit="°C" step="1" value={flueGasTempC} onChange={setFlueGasTempC} />
+              <Field label="Ambient temperature" unit="°C" step="1" value={ambientTempC} onChange={setAmbientTempC} />
+            </div>
+            <Field label="Ambient relative humidity" unit="%" step="1" value={ambientRH} onChange={setAmbientRH} hint="Used to estimate moisture carried in with combustion air (L4)." />
+            <Readout label="Combustion air humidity" value={fmt(airHumidity,4)} unit="kg water/kg dry air" />
+          </Plate>
+
+          <Plate title="Manual loss inputs">
+            <Field label="Unburnt combustibles in ash" unit="%" step="0.1" value={unburntPct} onChange={setUnburntPct} hint="Needs ash sampling (carbon content, GCV of ash) to derive rigorously — enter your measured/estimated figure." />
+            <Field label="Radiation & convection (surface loss)" unit="%" step="0.1" value={radiationPct} onChange={setRadiationPct} hint="Typically 1–2% for a well-lagged boiler; larger/older units run higher." />
+            <Field label="Unaccounted-for losses" unit="%" step="0.1" value={unaccountedPct} onChange={setUnaccountedPct} />
+          </Plate>
+
+          <Plate title="Loss breakdown & efficiency">
+            <Readout label="L1 — Dry flue gas" value={fmt(indirect.L1,2)} unit="%" />
+            <Readout label="L2 — H2 in fuel" value={fmt(indirect.L2,2)} unit="%" />
+            <Readout label="L3 — Moisture in fuel" value={fmt(indirect.L3,2)} unit="%" />
+            <Readout label="L4 — Moisture in air" value={fmt(indirect.L4,2)} unit="%" />
+            <Readout label="L5 — Unburnt in ash" value={fmt(indirect.L5,2)} unit="%" />
+            <Readout label="L6 — Radiation & convection" value={fmt(indirect.L6,2)} unit="%" />
+            <Readout label="L7 — Unaccounted" value={fmt(indirect.L7,2)} unit="%" />
+            <Readout label="Total losses" value={fmt(indirect.total,2)} unit="%" big />
+            <Readout label="Boiler efficiency" value={fmt(indirect.efficiency,2)} unit="%" big />
+            <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+              Heat-loss method per ASME PTC 4 / BS 845 / JIS B8222 (same underlying structure across all
+              three). L1–L4 are calculated from combustion/fuel data; L5–L7 are entered directly since they
+              need ash sampling or a surface survey to derive properly — the defaults are reasonable
+              starting points for a biomass grate boiler, not a substitute for actual test data on a formal
+              performance test.
+            </div>
+          </Plate>
+        </>
+      ) : (
+        <>
+          <Plate title="Steam output">
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Steam flow" unit="kg/hr" step="10" value={steamFlowKgHr} onChange={setSteamFlowKgHr} />
+              <Field label="Steam pressure" unit="barg" step="0.5" value={steamPBarg} onChange={setSteamPBarg} />
+            </div>
+            <Field label="Feedwater temperature" unit="°C" step="1" value={feedwaterTempC} onChange={setFeedwaterTempC} />
+            <Readout label="Saturation temp" value={fmt(direct.Tsat,1)} unit="°C" />
+            <Readout label="Steam enthalpy (hg)" value={fmt(direct.hg,1)} unit="kJ/kg" />
+          </Plate>
+          <Plate title="Fuel input">
+            <Field label="Fuel flow" unit="kg/hr" step="10" value={fuelFlowKgHr} onChange={setFuelFlowKgHr} />
+          </Plate>
+          <Plate title="Efficiency (direct method)">
+            <Readout label="Heat output" value={fmt(direct.heatOutput_kJhr/1000,0)} unit="MJ/hr" />
+            <Readout label="Heat input" value={fmt(direct.heatInput_kJhr/1000,0)} unit="MJ/hr" />
+            <Readout label="Boiler efficiency" value={fmt(direct.efficiency,2)} unit="%" big />
+            <Readout label="Equivalent evaporation" value={fmt(direct.equivEvap,2)} unit="kg steam/kg fuel" />
+            <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+              Direct (input/output) method — efficiency = heat absorbed by steam ÷ heat supplied by fuel.
+              Simple and fast for routine checks, but doesn't show where losses occur; use the indirect
+              method above for a diagnostic breakdown.
+            </div>
+          </Plate>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ================= STEAM MASTER PANEL =================
+function SteamMasterPanel() {
+  const [tab, setTab] = useState("properties"); // 'properties' | 'flash' | 'distribution'
+
+  // --- steam properties ---
+  const [propMode, setPropMode] = useState("byPressure");
+  const [propPressureBarg, setPropPressureBarg] = useState(9);
+  const [propTempC, setPropTempC] = useState(175);
+
+  const props = useMemo(() => {
+    if (propMode === "byPressure") {
+      const pBarA = propPressureBarg + 1.01325;
+      const r = steamLookupByPressure(pBarA);
+      return { ...r, pBarA, pBarg: propPressureBarg, hfg: r.hg - r.hf };
+    } else {
+      const r = steamLookupByTemperature(propTempC);
+      return { ...r, T: propTempC, pBarg: r.P - 1.01325, hfg: r.hg - r.hf };
+    }
+  }, [propMode, propPressureBarg, propTempC]);
+
+  // --- flash steam ---
+  const [flashP1Barg, setFlashP1Barg] = useState(9);
+  const [flashP2Barg, setFlashP2Barg] = useState(1);
+  const [condensateFlowKgHr, setCondensateFlowKgHr] = useState(2000);
+
+  const flash = useMemo(() => {
+    const s1 = steamLookupByPressure(flashP1Barg + 1.01325);
+    const s2 = steamLookupByPressure(flashP2Barg + 1.01325);
+    const hfg2 = s2.hg - s2.hf;
+    const flashPct = Math.max(0, Math.min(100, ((s1.hf - s2.hf) / hfg2) * 100));
+    const flashMassKgHr = condensateFlowKgHr * flashPct / 100;
+    const remainingCondensateKgHr = condensateFlowKgHr - flashMassKgHr;
+    const flashVolM3Hr = flashMassKgHr * s2.vg;
+    return { s1, s2, hfg2, flashPct, flashMassKgHr, remainingCondensateKgHr, flashVolM3Hr };
+  }, [flashP1Barg, flashP2Barg, condensateFlowKgHr]);
+
+  // --- distribution loss (insulated steam pipe) ---
+  const [distPBarg, setDistPBarg] = useState(9);
+  const [distPipeOd, setDistPipeOd] = useState(114.3);
+  const [distAmbientC, setDistAmbientC] = useState(33);
+  const [distInsMaterial, setDistInsMaterial] = useState("rock");
+  const [distInsDensity, setDistInsDensity] = useState(100);
+  const [distInsThk, setDistInsThk] = useState(50);
+  const [distJacketLabel, setDistJacketLabel] = useState(JACKET_OPTIONS[0].label);
+  const [distLengthM, setDistLengthM] = useState(100);
+
+  const dist = useMemo(() => {
+    const steamT = steamLookupByPressure(distPBarg + 1.01325).T;
+    const emissivity = JACKET_OPTIONS.find(j => j.label === distJacketLabel)?.eps ?? 0.15;
+    const r = solvePipeInsulation(steamT, distAmbientC, distPipeOd, distInsThk, distInsMaterial, distInsDensity, emissivity);
+    const totalLossKW = (r.Q * distLengthM) / 1000;
+    const hfg = steamLookupByPressure(distPBarg + 1.01325).hg - steamLookupByPressure(distPBarg + 1.01325).hf;
+    const equivSteamKgHr = hfg > 0 ? (totalLossKW * 3600) / hfg : 0;
+    return { steamT, ...r, totalLossKW, equivSteamKgHr };
+  }, [distPBarg, distPipeOd, distAmbientC, distInsMaterial, distInsDensity, distInsThk, distJacketLabel, distLengthM]);
+
+  return (
+    <div>
+      <StickyResults items={
+        tab === "properties" ? [
+          { label: "Tsat", value: fmt(props.T,1), unit: "°C" },
+          { label: "hg", value: fmt(props.hg,1), unit: "kJ/kg" },
+        ] : tab === "flash" ? [
+          { label: "Flash %", value: fmt(flash.flashPct,2), unit: "%" },
+          { label: "Flash steam", value: fmt(flash.flashMassKgHr,1), unit: "kg/hr" },
+        ] : [
+          { label: "Heat loss", value: fmt(dist.totalLossKW,2), unit: "kW" },
+          { label: "Equiv. steam loss", value: fmt(dist.equivSteamKgHr,1), unit: "kg/hr" },
+        ]
+      } />
+
+      <Plate title="Steam Master">
+        <div className="grid grid-cols-3 gap-2 mb-1">
+          <button onClick={() => setTab("properties")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${tab === "properties" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Properties</button>
+          <button onClick={() => setTab("flash")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${tab === "flash" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Flash Steam</button>
+          <button onClick={() => setTab("distribution")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${tab === "distribution" ? "bg-emerald-500 text-neutral-950 border-emerald-500" : "border-neutral-700 text-neutral-300"}`}>Distribution</button>
+        </div>
+      </Plate>
+
+      {tab === "properties" && (
+        <>
+          <Plate title="Inputs">
+            <div className="flex gap-2 mb-3">
+              <button onClick={() => setPropMode("byPressure")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${propMode === "byPressure" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>By pressure</button>
+              <button onClick={() => setPropMode("byTemp")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${propMode === "byTemp" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>By temperature</button>
+            </div>
+            {propMode === "byPressure" ? (
+              <Field label="Pressure" unit="barg" step="0.5" value={propPressureBarg} onChange={setPropPressureBarg} />
+            ) : (
+              <Field label="Temperature" unit="°C" step="1" value={propTempC} onChange={setPropTempC} />
+            )}
+          </Plate>
+          <Plate title="Saturated steam properties">
+            <Readout label="Pressure" value={fmt(props.pBarg,2)} unit="barg" />
+            <Readout label="Saturation temperature" value={fmt(props.T,1)} unit="°C" big />
+            <Readout label="hf (sat. liquid)" value={fmt(props.hf,1)} unit="kJ/kg" />
+            <Readout label="hg (sat. vapor)" value={fmt(props.hg,1)} unit="kJ/kg" big />
+            <Readout label="hfg (latent heat)" value={fmt(props.hfg,1)} unit="kJ/kg" />
+            <Readout label="vg (specific volume)" value={fmt(props.vg,3)} unit="m³/kg" />
+            <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+              Saturated (dry, x=1) properties only — no superheated steam table in this tool. Covers
+              1–100 bar abs / 100–311°C, interpolated from a verified reference table.
+            </div>
+          </Plate>
+        </>
+      )}
+
+      {tab === "flash" && (
+        <>
+          <Plate title="Inputs">
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Condensate pressure (before trap)" unit="barg" step="0.5" value={flashP1Barg} onChange={setFlashP1Barg} />
+              <Field label="Flash vessel pressure (after)" unit="barg" step="0.5" value={flashP2Barg} onChange={setFlashP2Barg} />
+            </div>
+            <Field label="Condensate flow" unit="kg/hr" step="10" value={condensateFlowKgHr} onChange={setCondensateFlowKgHr} />
+          </Plate>
+          <Plate title="Flash steam result">
+            <Readout label="hf at P1" value={fmt(flash.s1.hf,1)} unit="kJ/kg" />
+            <Readout label="hf at P2" value={fmt(flash.s2.hf,1)} unit="kJ/kg" />
+            <Readout label="hfg at P2" value={fmt(flash.hfg2,1)} unit="kJ/kg" />
+            <Readout label="Flash steam fraction" value={fmt(flash.flashPct,2)} unit="%" big />
+            <Readout label="Flash steam mass" value={fmt(flash.flashMassKgHr,1)} unit="kg/hr" big />
+            <Readout label="Flash steam volume (at P2)" value={fmt(flash.flashVolM3Hr,2)} unit="m³/hr" />
+            <Readout label="Remaining condensate" value={fmt(flash.remainingCondensateKgHr,1)} unit="kg/hr" />
+            <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+              Flash fraction = (hf@P1 − hf@P2) / hfg@P2 — standard flash steam formula. Recovering this to
+              a low-pressure header (rather than venting) is one of the most common quick-payback steam
+              conservation measures.
+            </div>
+          </Plate>
+        </>
+      )}
+
+      {tab === "distribution" && (
+        <>
+          <Plate title="Inputs">
+            <Field label="Steam pressure" unit="barg" step="0.5" value={distPBarg} onChange={setDistPBarg} />
+            <Field label="Pipe outside diameter" unit="mm" step="1" value={distPipeOd} onChange={setDistPipeOd} hint="Check the Steel Properties tab for standard pipe OD by NPS/schedule." />
+            <Field label="Ambient temperature" unit="°C" step="1" value={distAmbientC} onChange={setDistAmbientC} />
+            <div className="flex gap-2 mb-3">
+              <button onClick={() => setDistInsMaterial("glass")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${distInsMaterial === "glass" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Glass wool</button>
+              <button onClick={() => setDistInsMaterial("rock")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${distInsMaterial === "rock" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Rock wool</button>
+            </div>
+            <Field label="Insulation density" unit="kg/m³" step="1" value={distInsDensity} onChange={setDistInsDensity} />
+            <Field label="Insulation thickness" unit="mm" step="5" value={distInsThk} onChange={setDistInsThk} />
+            <Select label="Outer jacket / cladding" value={distJacketLabel} onChange={setDistJacketLabel} options={JACKET_OPTIONS.map(j => ({ label: j.label }))} />
+            <Field label="Pipe run length" unit="m" step="1" value={distLengthM} onChange={setDistLengthM} />
+          </Plate>
+          <Plate title="Distribution loss">
+            <Readout label="Steam temperature" value={fmt(dist.steamT,1)} unit="°C" />
+            <Readout label="Outer surface temperature" value={fmt(dist.Ts,1)} unit="°C" />
+            <Readout label="Heat loss per meter" value={fmt(dist.Q,1)} unit="W/m" />
+            <Readout label="Total heat loss" value={fmt(dist.totalLossKW,2)} unit="kW" big />
+            <Readout label="Equivalent steam loss" value={fmt(dist.equivSteamKgHr,1)} unit="kg/hr" big />
+            <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+              Reuses the same pipe-insulation heat transfer model as the Insulation Selection tool. "Equivalent
+              steam loss" is the steam flow whose latent heat equals the pipe's heat loss — a quick way to
+              express distribution loss in familiar kg/hr terms.
+            </div>
+          </Plate>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ================= REFRACTORY HELPERS =================
 const BRICK_PRESETS = [
   { label: "Standard straight (230×114×64mm)", L: 230, H: 114, D: 64 },
@@ -2376,8 +2883,9 @@ const PIPE_TABLE = [
   { nps: "12", dn: 300, od: 323.85, sch: { 10: 4.57, 20: 6.35, 30: 8.38, STD: 9.53, 40: 10.31, XS: 12.70, 60: 14.27, 80: 17.48, 100: 21.44, 120: 25.40, 140: 28.58, 160: 33.32 } },
 ];
 
-function pipeWeightKgM(od_mm, t_mm) {
-  return 0.02466 * (od_mm - t_mm) * t_mm; // verified: matches ASME B36.10 published weights within rounding
+function pipeWeightKgM(od_mm, t_mm, density = STEEL_DENSITY) {
+  // area of pipe wall (mm²) = π × t × (OD − t); convert to m² (×1e-6) and multiply by density (kg/m³)
+  return Math.PI * 1e-6 * density * t_mm * (od_mm - t_mm); // reduces to the familiar 0.02466×(OD−t)×t at 7850 kg/m³
 }
 
 // JIS G3192 equal-flange H-beams (kg/m)
@@ -2426,7 +2934,18 @@ const CHANNEL_TABLE = [
   { size: "C 380×100×13×20", kgm: 67.30 },
 ];
 
-const STEEL_DENSITY = 7850; // kg/m3
+const STEEL_DENSITY = 7850; // kg/m3 (carbon steel, e.g. SS-400)
+
+// Material choices for plate & pipe weight calcs. Stainless (SUS304) is slightly denser than
+// carbon steel — commonly taken as 8000 kg/m3 in mill/supplier literature (vs. ~7850 for SS-400).
+const STEEL_MATERIALS = [
+  { label: "SS-400 (Carbon Steel)", density: 7850 },
+  { label: "SUS304 (Stainless Steel)", density: 8000 },
+];
+// Schedule keys treated as "stainless steel schedules" (ASME B36.19M 5S/10S/40S/80S) — these share
+// the same wall-thickness numbers as the carbon-steel B36.10M schedules of the same number for the
+// sizes in this table, so no separate dimension table is needed; only the label/density differ.
+const STAINLESS_SCH_KEYS = ["5", "10", "40", "80"];
 
 // ================= STEEL PROPERTIES PANEL =================
 function SteelPropertiesPanel() {
@@ -2436,11 +2955,13 @@ function SteelPropertiesPanel() {
   const [pipeNps, setPipeNps] = useState("4");
   const [pipeSch, setPipeSch] = useState("40");
   const [pipeLength, setPipeLength] = useState(6.0);
+  const [pipeMaterial, setPipeMaterial] = useState("SS-400 (Carbon Steel)");
 
   // plate
   const [plateThk, setPlateThk] = useState(6);
   const [plateWidth, setPlateWidth] = useState(1.5);
   const [plateLength, setPlateLength] = useState(6.0);
+  const [plateMaterial, setPlateMaterial] = useState("SS-400 (Carbon Steel)");
 
   // channel
   const [channelSize, setChannelSize] = useState(CHANNEL_TABLE[2].size);
@@ -2455,18 +2976,20 @@ function SteelPropertiesPanel() {
     const row = PIPE_TABLE.find(p => p.nps === pipeNps);
     const t = row?.sch[pipeSch];
     if (!row || t === undefined) return null;
+    const density = STEEL_MATERIALS.find(m => m.label === pipeMaterial)?.density ?? STEEL_DENSITY;
     const od = row.od;
     const id = od - 2 * t;
-    const kgm = pipeWeightKgM(od, t);
+    const kgm = pipeWeightKgM(od, t, density);
     const totalWeight = kgm * pipeLength;
     return { dn: row.dn, od, t, id, kgm, totalWeight, availableSch: Object.keys(row.sch) };
-  }, [pipeNps, pipeSch, pipeLength]);
+  }, [pipeNps, pipeSch, pipeLength, pipeMaterial]);
 
   const plate = useMemo(() => {
-    const kgm2 = (plateThk / 1000) * STEEL_DENSITY; // kg per m² for this thickness
+    const density = STEEL_MATERIALS.find(m => m.label === plateMaterial)?.density ?? STEEL_DENSITY;
+    const kgm2 = (plateThk / 1000) * density; // kg per m² for this thickness
     const weight = kgm2 * plateWidth * plateLength;
     return { kgm2, weight };
-  }, [plateThk, plateWidth, plateLength]);
+  }, [plateThk, plateWidth, plateLength, plateMaterial]);
 
   const channel = useMemo(() => {
     const row = CHANNEL_TABLE.find(c => c.size === channelSize);
@@ -2514,12 +3037,34 @@ function SteelPropertiesPanel() {
       {section === "pipe" && (
         <>
           <Plate title="Inputs">
+            <Select
+              label="Material"
+              value={pipeMaterial}
+              onChange={(v) => {
+                setPipeMaterial(v);
+                // stainless pipe is normally ordered on the 5S/10S/40S/80S schedules — default
+                // to Sch 10(S) when switching to stainless if the current schedule isn't one of those
+                if (v === "SUS304 (Stainless Steel)" && !STAINLESS_SCH_KEYS.includes(pipeSch)) setPipeSch("10");
+              }}
+              options={STEEL_MATERIALS.map(m => ({ label: m.label }))}
+            />
             <Select label="Nominal pipe size (NPS)" value={pipeNps} onChange={(v) => { setPipeNps(v); const row = PIPE_TABLE.find(p => p.nps === v); if (row && !row.sch[pipeSch]) setPipeSch(Object.keys(row.sch)[0]); }} options={PIPE_TABLE.map(p => ({ label: p.nps }))} />
-            <Select label="Schedule" value={pipeSch} onChange={setPipeSch} options={(PIPE_TABLE.find(p => p.nps === pipeNps)?.sch ? Object.keys(PIPE_TABLE.find(p => p.nps === pipeNps).sch) : []).map(s => ({ label: s }))} />
+            <Select
+              label="Schedule"
+              value={pipeSch}
+              onChange={setPipeSch}
+              options={(() => {
+                const allKeys = PIPE_TABLE.find(p => p.nps === pipeNps)?.sch ? Object.keys(PIPE_TABLE.find(p => p.nps === pipeNps).sch) : [];
+                const isStainless = pipeMaterial === "SUS304 (Stainless Steel)";
+                const keys = isStainless ? allKeys.filter(k => STAINLESS_SCH_KEYS.includes(k)) : allKeys;
+                return keys.map(s => ({ value: s, label: isStainless ? `${s}S` : s }));
+              })()}
+            />
             <Field label="Length" unit="m" step="0.1" value={pipeLength} onChange={setPipeLength} />
           </Plate>
           {pipe && (
-            <Plate title="Pipe dimensions & weight (ASME B36.10M)">
+            <Plate title={pipeMaterial === "SUS304 (Stainless Steel)" ? "Pipe dimensions & weight (ASME B36.19M)" : "Pipe dimensions & weight (ASME B36.10M)"}>
+              <Readout label="Material" value={pipeMaterial} unit="" />
               <Readout label="DN" value={fmt(pipe.dn,0)} unit="mm" />
               <Readout label="Outside diameter (OD)" value={fmt(pipe.od,2)} unit="mm" big />
               <Readout label="Wall thickness" value={fmt(pipe.t,2)} unit="mm" big />
@@ -2530,6 +3075,11 @@ function SteelPropertiesPanel() {
                 Covers NPS 1/2"–12". STD and Sch40 (and XS/Sch80) are shown separately since they diverge
                 above NPS 10 — e.g. at NPS 12, STD = 9.53mm but Sch40 = 10.31mm. Don't assume they're
                 interchangeable at larger sizes. For NPS 14" and above, consult ASME B36.10M directly.
+                {pipeMaterial === "SUS304 (Stainless Steel)" && (
+                  <> Stainless schedules 5S/10S/40S/80S share the same wall-thickness numbers as carbon-steel
+                  Sch 5/10/40/80 in this size range; weight is scaled using 8000 kg/m³ for SUS304 instead of
+                  7850 kg/m³ for carbon steel.</>
+                )}
               </div>
             </Plate>
           )}
@@ -2539,6 +3089,7 @@ function SteelPropertiesPanel() {
       {section === "plate" && (
         <>
           <Plate title="Inputs">
+            <Select label="Material" value={plateMaterial} onChange={setPlateMaterial} options={STEEL_MATERIALS.map(m => ({ label: m.label }))} />
             <Field label="Thickness" unit="mm" step="0.5" value={plateThk} onChange={setPlateThk} />
             <div className="grid grid-cols-2 gap-x-3">
               <Field label="Width" unit="m" step="0.05" value={plateWidth} onChange={setPlateWidth} />
@@ -2546,11 +3097,13 @@ function SteelPropertiesPanel() {
             </div>
           </Plate>
           <Plate title="Plate weight">
+            <Readout label="Material" value={plateMaterial} unit="" />
             <Readout label="Weight per m²" value={fmt(plate.kgm2,2)} unit="kg/m²" />
             <Readout label="Sheet weight" value={fmt(plate.weight,1)} unit="kg" big />
             <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
-              Pure geometry: thickness × width × length × 7850 kg/m³. Rule of thumb: 1mm thickness ≈
-              7.85 kg/m², so a 6mm plate ≈ 47.1 kg/m² — quick to sanity-check by hand.
+              Pure geometry: thickness × width × length × density, where density is {fmt(STEEL_MATERIALS.find(m => m.label === plateMaterial)?.density ?? STEEL_DENSITY,0)} kg/m³
+              for {plateMaterial}. Rule of thumb at that density: 1mm thickness ≈ {fmt((STEEL_MATERIALS.find(m => m.label === plateMaterial)?.density ?? STEEL_DENSITY)/1000,2)} kg/m²,
+              so a 6mm plate ≈ {fmt(6*(STEEL_MATERIALS.find(m => m.label === plateMaterial)?.density ?? STEEL_DENSITY)/1000,1)} kg/m² — quick to sanity-check by hand.
             </div>
           </Plate>
         </>
@@ -2593,6 +3146,203 @@ function SteelPropertiesPanel() {
         tolerances mean real piece weights can vary a percent or two — confirm against the mill certificate
         for anything going into a final BOQ.
       </div>
+    </div>
+  );
+}
+
+// ================= GAS & AIR FLOW CONVERTER HELPERS =================
+// Reference conditions:
+//   FAD (Free Air Delivery, ISO 1217-style): 20°C, 65% RH, 1 atm — total (wet) gas volume basis
+//   Nm³ (Normal): 0°C, dry, 101.325 kPa — DRY gas basis (moisture stripped out)
+//   Sm³ (Standard): 15°C, dry, 101.325 kPa — DRY gas basis (common O&G/EU convention; some
+//     industries use 20°C or 25°C for "standard" — confirm against your specific contract/spec)
+// Actual flow is converted to a dry-gas molar basis using its own T/P/RH, then re-expanded to each
+// reference condition at that reference's own T/P (and RH, for the wet-basis FAD figure).
+const FLOW_REF = {
+  Actual: null, // user-defined T/P/RH
+  FAD: { T: 20, RH: 65, wet: true },
+  Nm3: { T: 0, RH: 0, wet: false },
+  Sm3: { T: 15, RH: 0, wet: false },
+};
+const P_ATM_KPA = 101.325;
+
+function flowConvert(Qactual_m3min, Tact, Pact_kPa, RHact) {
+  const PwAct = (RHact / 100) * satVaporPressureKPa(Tact);
+  const PdryAct = Pact_kPa - PwAct;
+  // dry-gas "normal moles" reference (proportional quantity, m3/min at Nm3 dry conditions)
+  const Q_dryNormal = Qactual_m3min * (PdryAct / P_ATM_KPA) * (273.15 / (Tact + 273.15));
+
+  const results = {};
+  Object.entries(FLOW_REF).forEach(([key, ref]) => {
+    if (key === "Actual") { results[key] = Qactual_m3min; return; }
+    if (!ref.wet) {
+      // dry basis (Nm3 / Sm3): expand the dry-normal quantity to this reference's temperature at 1 atm dry
+      results[key] = Q_dryNormal * ((ref.T + 273.15) / 273.15);
+    } else {
+      // wet basis (FAD): total gas volume including moisture at the reference RH, same total pressure
+      const PwRef = (ref.RH / 100) * satVaporPressureKPa(ref.T);
+      const PdryRef = P_ATM_KPA - PwRef;
+      results[key] = Q_dryNormal * (P_ATM_KPA / PdryRef) * ((ref.T + 273.15) / 273.15);
+    }
+  });
+  return results;
+}
+
+// ================= FLOW UNIT CONVERTER PANEL =================
+function FlowConverterPanel() {
+  const [inputBasis, setInputBasis] = useState("Actual");
+  const [flowValue, setFlowValue] = useState(10.0);
+  const [flowUnit, setFlowUnit] = useState("m³/min");
+  const [Tact, setTact] = useState(35);
+  const [Pact_kPa, setPactKPa] = useState(101.325);
+  const [RHact, setRHact] = useState(60);
+
+  const toM3Min = { "m³/min": 1, "m³/hr": 1/60, "L/min": 0.001, "L/s": 0.06, "m³/s": 60 };
+
+  const results = useMemo(() => {
+    const Q_m3min_inputUnits = flowValue * (toM3Min[flowUnit] ?? 1);
+    // convert the entered value (in its own reference basis) back to an equivalent "actual" flow at
+    // Tact/Pact/RHact first, then run the full conversion from that common actual basis
+    let Qact_m3min;
+    if (inputBasis === "Actual") {
+      Qact_m3min = Q_m3min_inputUnits;
+    } else {
+      const ref = FLOW_REF[inputBasis];
+      const PwAct = (RHact / 100) * satVaporPressureKPa(Tact);
+      const PdryAct = Pact_kPa - PwAct;
+      if (!ref.wet) {
+        const Q_dryNormal = Q_m3min_inputUnits / ((ref.T + 273.15) / 273.15);
+        Qact_m3min = Q_dryNormal * (P_ATM_KPA / PdryAct) * ((Tact + 273.15) / 273.15);
+      } else {
+        const PwRef = (ref.RH / 100) * satVaporPressureKPa(ref.T);
+        const PdryRef = P_ATM_KPA - PwRef;
+        const Q_dryNormal = Q_m3min_inputUnits / ((P_ATM_KPA / PdryRef) * ((ref.T + 273.15) / 273.15));
+        Qact_m3min = Q_dryNormal * (P_ATM_KPA / PdryAct) * ((Tact + 273.15) / 273.15);
+      }
+    }
+    return flowConvert(Qact_m3min, Tact, Pact_kPa, RHact);
+  }, [inputBasis, flowValue, flowUnit, Tact, Pact_kPa, RHact]);
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "Nm³/min", value: fmt(results.Nm3,3), unit: "" },
+        { label: "Sm³/min", value: fmt(results.Sm3,3), unit: "" },
+        { label: "FAD m³/min", value: fmt(results.FAD,3), unit: "" },
+      ]} />
+
+      <Plate title="Input flow">
+        <Select label="Basis" value={inputBasis} onChange={setInputBasis} options={[{ label: "Actual" }, { label: "FAD" }, { label: "Nm³", value: "Nm3" }, { label: "Sm³", value: "Sm3" }]} />
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Flow value" step="0.1" value={flowValue} onChange={setFlowValue} />
+          <Select label="Unit" value={flowUnit} onChange={setFlowUnit} options={Object.keys(toM3Min).map(u => ({ label: u }))} />
+        </div>
+      </Plate>
+
+      <Plate title="Actual (measured) conditions">
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Temperature" unit="°C" step="1" value={Tact} onChange={setTact} />
+          <Field label="Pressure (abs)" unit="kPa" step="1" value={Pact_kPa} onChange={setPactKPa} />
+        </div>
+        <Field label="Relative humidity" unit="%" step="1" value={RHact} onChange={setRHact} hint="Used to correct the dry-gas (Nm³/Sm³) figures for moisture." />
+      </Plate>
+
+      <Plate title="Converted flow (all bases)">
+        <Readout label="Actual" value={fmt(results.Actual,3)} unit="m³/min" />
+        <Readout label="FAD (20°C, 65%RH, 1 atm)" value={fmt(results.FAD,3)} unit="m³/min" big />
+        <Readout label="Nm³ (0°C, dry, 1 atm)" value={fmt(results.Nm3,3)} unit="m³/min" big />
+        <Readout label="Sm³ (15°C, dry, 1 atm)" value={fmt(results.Sm3,3)} unit="m³/min" big />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          Nm³/Sm³ are computed on a dry-gas basis (moisture stripped out, per ISO 13443 convention);
+          FAD is a wet (total gas) volume at its reference RH, per typical ISO 1217 compressor practice.
+          "Standard" conditions vary by industry/contract — this tool uses 15°C dry for Sm³; confirm
+          against your specific spec if it differs.
+        </div>
+      </Plate>
+    </div>
+  );
+}
+
+// ================= PSYCHROMETRIC HELPERS =================
+function psychroFromDbRh(Tdb, RH, P_kPa) {
+  const Psat = satVaporPressureKPa(Tdb);
+  const Pw = (RH / 100) * Psat;
+  const W = 0.622 * Pw / (P_kPa - Pw);
+  const h = 1.006 * Tdb + W * (2501 + 1.86 * Tdb);
+  const v = (0.287 * (Tdb + 273.15) * (1 + 1.6078 * W)) / P_kPa;
+  const rho = (1 + W) / v;
+  const lnr = Math.log(Math.max(Pw, 1e-6) / 0.61094);
+  const Tdp = (243.04 * lnr) / (17.625 - lnr);
+  // wet bulb via WMO ventilated-psychrometer relation, solved by bisection
+  let lo = Tdp, hi = Tdb;
+  for (let i = 0; i < 50; i++) {
+    const Twb = (lo + hi) / 2;
+    const A = 0.00066 * (1 + 0.00115 * Twb);
+    const PwCalc = satVaporPressureKPa(Twb) - A * P_kPa * (Tdb - Twb);
+    if (PwCalc < Pw) lo = Twb; else hi = Twb;
+  }
+  const Twb = (lo + hi) / 2;
+  return { Tdb, RH, Psat, Pw, W, h, v, rho, Tdp, Twb };
+}
+
+function psychroFromDbWb(Tdb, Twb, P_kPa) {
+  const A = 0.00066 * (1 + 0.00115 * Twb);
+  const Pw = Math.max(0, satVaporPressureKPa(Twb) - A * P_kPa * (Tdb - Twb));
+  const Psat = satVaporPressureKPa(Tdb);
+  const RH = Math.max(0, Math.min(100, (Pw / Psat) * 100));
+  return psychroFromDbRh(Tdb, RH, P_kPa);
+}
+
+// ================= PSYCHROMETRIC PANEL =================
+function PsychrometricPanel() {
+  const [inputPair, setInputPair] = useState("dbrh"); // 'dbrh' | 'dbwb'
+  const [Tdb, setTdb] = useState(30);
+  const [RH, setRH] = useState(60);
+  const [Twb, setTwb] = useState(24);
+  const [P_kPa, setPKPa] = useState(101.325);
+
+  const r = useMemo(() => {
+    return inputPair === "dbrh" ? psychroFromDbRh(Tdb, RH, P_kPa) : psychroFromDbWb(Tdb, Twb, P_kPa);
+  }, [inputPair, Tdb, RH, Twb, P_kPa]);
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "RH", value: fmt(r.RH,1), unit: "%" },
+        { label: "Wet bulb", value: fmt(r.Twb,1), unit: "°C" },
+        { label: "Enthalpy", value: fmt(r.h,1), unit: "kJ/kg" },
+      ]} />
+
+      <Plate title="Known values">
+        <div className="grid grid-cols-2 gap-2 mb-1">
+          <button onClick={() => setInputPair("dbrh")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${inputPair === "dbrh" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Dry bulb + RH</button>
+          <button onClick={() => setInputPair("dbwb")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${inputPair === "dbwb" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Dry bulb + Wet bulb</button>
+        </div>
+        <Field label="Dry bulb temperature" unit="°C" step="0.5" value={Tdb} onChange={setTdb} />
+        {inputPair === "dbrh" ? (
+          <Field label="Relative humidity" unit="%" step="1" value={RH} onChange={setRH} />
+        ) : (
+          <Field label="Wet bulb temperature" unit="°C" step="0.5" value={Twb} onChange={setTwb} />
+        )}
+        <Field label="Barometric pressure" unit="kPa" step="0.1" value={P_kPa} onChange={setPKPa} hint="101.325 kPa at sea level; reduce for elevation." />
+      </Plate>
+
+      <Plate title="Moist air properties">
+        <Readout label="Dry bulb" value={fmt(r.Tdb,1)} unit="°C" />
+        <Readout label="Wet bulb" value={fmt(r.Twb,1)} unit="°C" big />
+        <Readout label="Relative humidity" value={fmt(r.RH,1)} unit="%" big />
+        <Readout label="Dew point" value={fmt(r.Tdp,1)} unit="°C" />
+        <Readout label="Humidity ratio (W)" value={fmt(r.W,5)} unit="kg water/kg dry air" />
+        <Readout label="Enthalpy (h)" value={fmt(r.h,2)} unit="kJ/kg dry air" big />
+        <Readout label="Specific volume (v)" value={fmt(r.v,4)} unit="m³/kg dry air" />
+        <Readout label="Moist air density" value={fmt(r.rho,3)} unit="kg/m³" />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          Standard psychrometric relations (Tetens saturation-pressure formula, ASHRAE-style humidity
+          ratio/enthalpy/specific-volume equations). Supports Dry bulb+RH or Dry bulb+Wet bulb as the two
+          known inputs; other input pairs (e.g. Dry bulb+Dew point) aren't wired up yet — ask if you need
+          one added.
+        </div>
+      </Plate>
     </div>
   );
 }
@@ -5759,6 +6509,16 @@ function GanttPanel() {
   const [projectStartDate, setProjectStartDate] = useState(gnTodayStr());
   const [tasks, setTasks] = useState(GANTT_DEFAULT_TASKS);
 
+  // ---- save / load whole schedule as a .json file ----
+  const saveGanttSnapshot = () => ({ projectName, clientName, projectStartDate, tasks });
+  const loadGanttSnapshot = (d) => {
+    if (!d) return;
+    if (d.projectName !== undefined) setProjectName(d.projectName);
+    if (d.clientName !== undefined) setClientName(d.clientName);
+    if (d.projectStartDate !== undefined) setProjectStartDate(d.projectStartDate);
+    if (Array.isArray(d.tasks)) setTasks(d.tasks);
+  };
+
   const updateTask = (id, field, val) => setTasks(tasks.map((t) => (t.id === id ? { ...t, [field]: val } : t)));
   const removeTask = (id) => setTasks(tasks.filter((t) => t.id !== id));
   const addTask = () => setTasks([...tasks, gnNewTask({ name: "New task" })]);
@@ -5897,7 +6657,8 @@ function GanttPanel() {
         .print-sheet { display: none; }
       `}</style>
 
-      <div className="no-print flex justify-end mb-3">
+      <div className="no-print flex flex-wrap justify-end gap-2 mb-3">
+        <SaveLoadBar onSave={saveGanttSnapshot} onLoad={loadGanttSnapshot} filename={`gantt_${projectName || "schedule"}`} />
         <button onClick={() => window.print()} className="px-4 py-2 rounded text-xs font-bold uppercase tracking-wide bg-emerald-600 text-white hover:bg-emerald-500">
           {tr("🖨 Print / Save as PDF")}
         </button>
@@ -6541,6 +7302,8 @@ const TOOL_CATALOG = [
     category: "Boiler Engineering",
     tools: [
       { id: "boiler", icon: "🔥", name: "Combustion, Steam & Draft", desc: "Flue gas, steam table, ID/FD fan sizing" },
+      { id: "boilereff", icon: "📊", name: "Boiler Efficiency", desc: "Indirect (heat loss) & direct method — ASME PTC4 / BS845 / JIS B8222" },
+      { id: "steammaster", icon: "🌫️", name: "Steam Master", desc: "Steam properties, flash steam recovery, distribution loss" },
       { id: "fuelconsumption", icon: "⛽", name: "Fuel Consumption", desc: "LPG, heavy oil, or biomass fuel rate from steam duty" },
       { id: "stepgrate", icon: "🪜", name: "Step Grate Hydraulic Timing", desc: "3-zone reciprocating grate push/dwell timing, fixed stroke" },
       { id: "pressuredrop", icon: "📉", name: "System Pressure Drop", desc: "Furnace → boiler → multicyclone → scrubber → duct → stack" },
@@ -6548,6 +7311,13 @@ const TOOL_CATALOG = [
       { id: "insulation", icon: "🧊", name: "Insulation Selection", desc: "Glass/rock wool thickness vs surface temp & density" },
       { id: "specsheet", icon: "📋", name: "Project Spec Sheet Generator", desc: "Fill a form, print/PDF a full boiler project spec sheet" },
       { id: "gantt", icon: "📅", name: "Project Schedule / Gantt Chart", desc: "Editable task timeline with milestones, print/PDF for customer" },
+    ],
+  },
+  {
+    category: "Energy Engineering",
+    tools: [
+      { id: "flowconv", icon: "💨", name: "Gas & Air Flow Converter", desc: "FAD · Nm³ · Sm³ · Actual flow, with humidity correction" },
+      { id: "psychro", icon: "🌡️", name: "Psychrometric Properties", desc: "DB, WB, RH, dew point, humidity ratio, enthalpy, density" },
     ],
   },
   {
@@ -6618,6 +7388,35 @@ function ToolIcon({ id, className }) {
     case "boiler": return (
       <svg {...p}>
         <path d="M12 2 C7 7 6 11 8 15 C9 17.5 12 19 12 19 C12 19 15 17.5 16 15 C18 11 17 7 12 2 Z" />
+      </svg>
+    );
+    case "boilereff": return (
+      <svg {...p}>
+        <path d="M4 20 L4 12 L9 12 L9 20" />
+        <path d="M9 20 L9 6 L14 6 L14 20" />
+        <path d="M14 20 L14 9 L19 9 L19 20" />
+      </svg>
+    );
+    case "steammaster": return (
+      <svg {...p}>
+        <path d="M6 10 C6 7 8 6 8 6 C8 6 7 8 8 9 C9 10 9 8 9 8" />
+        <path d="M11 10 C11 7 13 6 13 6 C13 6 12 8 13 9 C14 10 14 8 14 8" />
+        <path d="M16 10 C16 7 18 6 18 6 C18 6 17 8 18 9 C19 10 19 8 19 8" />
+        <rect x="4" y="12" width="16" height="8" rx="1" />
+      </svg>
+    );
+    case "flowconv": return (
+      <svg {...p}>
+        <path d="M3 8 H15 M11 4 L15 8 L11 12" />
+        <path d="M21 16 H9 M13 12 L9 16 L13 20" />
+      </svg>
+    );
+    case "psychro": return (
+      <svg {...p}>
+        <path d="M12 3 V15" />
+        <circle cx="12" cy="17" r="4" />
+        <line x1="9" y1="7" x2="12" y2="7" />
+        <line x1="9" y1="10" x2="12" y2="10" />
       </svg>
     );
     case "gantt": return (
@@ -6756,6 +7555,7 @@ const CATEGORY_COLORS = {
   "Pressure Vessel": "text-violet-400 group-hover:border-violet-500",
   "Water Treatment": "text-cyan-400 group-hover:border-cyan-500",
   "Boiler Engineering": "text-orange-400 group-hover:border-orange-500",
+  "Energy Engineering": "text-lime-400 group-hover:border-lime-500",
   "Reference / Materials": "text-teal-400 group-hover:border-teal-500",
   "Electrical & Instrumentation": "text-amber-400 group-hover:border-amber-500",
   "AI Assistant": "text-emerald-400 group-hover:border-emerald-500",
@@ -6763,6 +7563,23 @@ const CATEGORY_COLORS = {
 };
 
 function ToolboxHome({ onSelect, lang, onToggleLang }) {
+  const [query, setQuery] = useState("");
+  const [collapsed, setCollapsed] = useState({});
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? TOOL_CATALOG.map((group) => ({
+        ...group,
+        tools: group.tools.filter((t) =>
+          t.name.toLowerCase().includes(q) || t.desc.toLowerCase().includes(q) ||
+          tr(t.name).toLowerCase().includes(q) || tr(t.desc).toLowerCase().includes(q) ||
+          group.category.toLowerCase().includes(q) || tr(group.category).toLowerCase().includes(q)
+        ),
+      })).filter((group) => group.tools.length > 0)
+    : TOOL_CATALOG;
+
+  const toggleCollapsed = (category) => setCollapsed((c) => ({ ...c, [category]: !c[category] }));
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-center gap-3">
@@ -6771,27 +7588,62 @@ function ToolboxHome({ onSelect, lang, onToggleLang }) {
           {lang === "th" ? "TH | en" : "th | EN"}
         </button>
       </div>
-      <div className="space-y-5">
-        {TOOL_CATALOG.map((group) => (
-          <div key={group.category}>
-            <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold mb-2 text-center">{tr(group.category)}</div>
-            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-3 justify-items-center">
-              {group.tools.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => onSelect(t.id)}
-                  title={tr(t.desc)}
-                  className="group flex flex-col items-center gap-1"
-                >
-                  <div className={`w-14 h-14 rounded-2xl bg-neutral-900 border border-neutral-700 flex items-center justify-center transition-all group-hover:scale-105 group-active:scale-95 ${CATEGORY_COLORS[group.category]}`}>
-                    <ToolIcon id={t.id} className="w-6 h-6" />
-                  </div>
-                  <span className="text-[10px] text-neutral-400 text-center leading-tight w-16">{tr(t.name)}</span>
-                </button>
-              ))}
+
+      <div className="max-w-md mx-auto mb-5 relative">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={tr("Search tools…")}
+          className="w-full bg-neutral-900 border-2 border-neutral-700 focus:border-amber-500 focus:outline-none rounded-lg pl-9 pr-8 py-2.5 text-sm text-neutral-100"
+        />
+        <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        {query && (
+          <button onClick={() => setQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-100 text-sm">✕</button>
+        )}
+      </div>
+
+      {filtered.length === 0 && (
+        <div className="text-center text-xs text-neutral-400 py-8">{tr("No tools match your search.")}</div>
+      )}
+
+      <div className="space-y-6">
+        {filtered.map((group) => {
+          const isCollapsed = !q && collapsed[group.category];
+          return (
+            <div key={group.category}>
+              <button
+                onClick={() => toggleCollapsed(group.category)}
+                className="w-full flex items-center justify-center gap-2 mb-3 pb-1.5 border-b border-neutral-800 group/header"
+              >
+                <span className="text-[12px] uppercase tracking-wider text-neutral-200 group-hover/header:text-amber-400 font-bold text-center">{tr(group.category)}</span>
+                <span className="text-[11px] text-neutral-500 font-semibold">({group.tools.length})</span>
+                <svg className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+              {!isCollapsed && (
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4 justify-items-center">
+                  {group.tools.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => onSelect(t.id)}
+                      title={tr(t.desc)}
+                      className="group flex flex-col items-center gap-1.5"
+                    >
+                      <div className={`w-16 h-16 rounded-2xl bg-neutral-800 border-2 border-neutral-600 flex items-center justify-center transition-all group-hover:scale-105 group-hover:border-amber-500 group-active:scale-95 shadow-md ${CATEGORY_COLORS[group.category]}`}>
+                        <ToolIcon id={t.id} className="w-7 h-7" />
+                      </div>
+                      <span className="text-[11px] font-medium text-neutral-300 group-hover:text-neutral-50 text-center leading-tight w-20">{tr(t.name)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className="text-[9px] text-neutral-600 mt-4 text-center leading-snug">
         {lang === "th"
@@ -6882,6 +7734,14 @@ function ConveyorSizingCalculator() {
               <WaterTreatmentPanel />
             ) : tab === "boiler" ? (
               <BoilerPanel />
+            ) : tab === "boilereff" ? (
+              <BoilerEfficiencyPanel />
+            ) : tab === "steammaster" ? (
+              <SteamMasterPanel />
+            ) : tab === "flowconv" ? (
+              <FlowConverterPanel />
+            ) : tab === "psychro" ? (
+              <PsychrometricPanel />
             ) : tab === "fuelconsumption" ? (
               <FuelConsumptionPanel />
             ) : tab === "stepgrate" ? (

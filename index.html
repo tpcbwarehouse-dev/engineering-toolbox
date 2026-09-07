@@ -10,9 +10,63 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   body { margin: 0; background: #0a0a0a; }
+  html.theme-light body { background: #f1f5f9; }
   @media print {
     html, body { background: white !important; }
+    .app-sidebar { display: none !important; }
   }
+
+  /* ===== Light theme: remap the dark neutral tokens to a light slate palette =====
+     The components are authored dark-first; this layer swaps the surface/text/border
+     tokens (and low-contrast accent tints) when <html class="theme-light"> is set. */
+  .theme-light .bg-neutral-950, .theme-light .bg-neutral-950\/95 { background-color: #f8fafc; }
+  .theme-light .bg-neutral-900, .theme-light .bg-neutral-900\/60, .theme-light .bg-neutral-900\/50 { background-color: #ffffff; }
+  .theme-light .bg-neutral-800 { background-color: #f1f5f9; }
+  .theme-light .bg-neutral-500 { background-color: #94a3b8; }
+  .theme-light .border-neutral-800 { border-color: #e2e8f0; }
+  .theme-light .border-neutral-700 { border-color: #cbd5e1; }
+  .theme-light .border-neutral-600 { border-color: #94a3b8; }
+  .theme-light .border-neutral-400 { border-color: #64748b; }
+  .theme-light .text-neutral-50, .theme-light .text-neutral-100 { color: #0f172a; }
+  .theme-light .text-neutral-200, .theme-light .text-neutral-300 { color: #1e293b; }
+  .theme-light .text-neutral-400 { color: #475569; }
+  .theme-light .text-neutral-500 { color: #64748b; }
+  .theme-light .text-neutral-600 { color: #64748b; }
+  .theme-light .placeholder-neutral-500::placeholder { color: #94a3b8; }
+  .theme-light .shadow-md { box-shadow: 0 1px 3px rgba(15,23,42,.08), 0 1px 2px rgba(15,23,42,.06); }
+  .theme-light .backdrop-blur { backdrop-filter: none; }
+  /* accent text on light surfaces */
+  .theme-light .text-amber-400 { color: #b45309; }
+  .theme-light .text-sky-400 { color: #0369a1; }
+  .theme-light .text-emerald-400 { color: #047857; }
+  .theme-light .text-red-400 { color: #dc2626; }
+  .theme-light .text-lime-400 { color: #4d7c0f; }
+  .theme-light .text-teal-400 { color: #0f766e; }
+  .theme-light .text-violet-400 { color: #6d28d9; }
+  .theme-light .text-cyan-400 { color: #0e7490; }
+  .theme-light .text-orange-400 { color: #c2410c; }
+  .theme-light .text-rose-400 { color: #be123c; }
+  .theme-light .text-stone-400 { color: #57534e; }
+  .theme-light .text-neutral-950 { color: #0f172a; }
+  /* tinted notice boxes */
+  .theme-light .bg-sky-950\/30 { background-color: #f0f9ff; }
+  .theme-light .bg-amber-950\/30 { background-color: #fffbeb; }
+  .theme-light .bg-emerald-950\/30 { background-color: #ecfdf5; }
+  .theme-light .bg-red-950\/40 { background-color: #fef2f2; }
+  .theme-light .border-sky-900 { border-color: #bae6fd; }
+  .theme-light .border-amber-900 { border-color: #fde68a; }
+  .theme-light .border-emerald-900 { border-color: #a7f3d0; }
+  .theme-light .border-red-900 { border-color: #fecaca; }
+  .theme-light .border-red-800 { border-color: #fca5a5; }
+  /* selected-state buttons keep their accent fill; ensure text stays dark */
+  .theme-light .bg-amber-500, .theme-light .bg-sky-500, .theme-light .bg-emerald-500 { color: #0f172a; }
+  .theme-light input, .theme-light select, .theme-light textarea { color-scheme: light; }
+  .theme-dark input, .theme-dark select, .theme-dark textarea { color-scheme: dark; }
+
+  /* sidebar */
+  .app-sidebar { scrollbar-width: thin; }
+  .app-sidebar::-webkit-scrollbar { width: 6px; }
+  .app-sidebar::-webkit-scrollbar-thumb { background: rgba(120,120,120,.35); border-radius: 3px; }
 </style>
 </head>
 <body>
@@ -28,6 +82,7 @@ const SYNC_RPM = [960, 1450, 2900];
 const BULK_DENSITY_PRESETS = [
   { label: "Wood chip (biomass)", value: 300 },
   { label: "Sawdust", value: 220 },
+  { label: "Wood pellet", value: 650 },
   { label: "EFB (empty fruit bunch, shredded)", value: 180 },
   { label: "Parawood chip", value: 280 },
   { label: "Rice husk", value: 130 },
@@ -442,12 +497,762 @@ const TH = {
   "1. Copy schedule": "1. คัดลอกแผนงาน",
   "2. Open blank Google Sheet ↗": "2. เปิด Google Sheet เปล่า ↗",
   "💾 Save File": "💾 บันทึกไฟล์",
+  // ---- Newer categories / tools ----
+  "Energy Engineering": "วิศวกรรมพลังงาน (Energy)",
+  "Civil / Foundation": "โยธา / ฐานราก",
+  "Boiler Efficiency": "ประสิทธิภาพหม้อไอน้ำ",
+  "Indirect (heat loss) & direct method — ASME PTC4 / BS845 / JIS B8222": "วิธี Indirect (heat loss) & Direct — ASME PTC4 / BS845 / JIS B8222",
+  "Steam Master": "Steam Master (ไอน้ำ)",
+  "Steam properties, flash steam recovery, distribution loss": "คุณสมบัติไอน้ำ, Flash steam, การสูญเสียในท่อส่ง",
+  "Gas & Air Flow Converter": "แปลงหน่วยอัตราไหลก๊าซ/อากาศ",
+  "FAD · Nm³ · Sm³ · Actual flow, with humidity correction": "FAD · Nm³ · Sm³ · Actual พร้อมชดเชยความชื้น",
+  "Psychrometric Properties": "คุณสมบัติอากาศชื้น (Psychrometric)",
+  "DB, WB, RH, dew point, humidity ratio, enthalpy, density": "DB, WB, RH, จุดน้ำค้าง, W, เอนทาลปี, ความหนาแน่น",
+  "Moving Floor Feeder": "Moving Floor Feeder",
+  "Walking floor stroke/cycle, capacity match, push force": "ระยะชัก/รอบ, จับคู่กำลังการผลิต, แรงดัน",
+  "Machine Foundation": "ฐานรากเครื่องจักร",
+  "Preliminary mass-ratio & bearing pressure check for equipment foundations": "ตรวจสอบอัตราส่วนมวล & แรงกดดินเบื้องต้นสำหรับฐานรากเครื่องจักร",
   "Search tools…": "ค้นหาเครื่องมือ…",
   "No tools match your search.": "ไม่พบเครื่องมือที่ตรงกับคำค้นหา",
+  "Recently used": "ใช้ล่าสุด",
+  "Result": "ผลลัพธ์",
+  "Method": "วิธีคำนวณ",
+  "Material": "วัสดุ",
+  "Machine data": "ข้อมูลเครื่องจักร",
+  "Foundation": "ฐานราก",
+  "Capacity check": "ตรวจสอบกำลังการผลิต",
+  "Capacity result": "ผลกำลังการผลิต",
+  "Process sizing result": "ผลการคำนวณขนาดกระบวนการ",
+  "Flash steam result": "ผล Flash steam",
+  "Distribution loss": "การสูญเสียในท่อส่ง",
+  "Loss breakdown & efficiency": "รายละเอียดการสูญเสีย & ประสิทธิภาพ",
+  "Prepared by": "ผู้จัดทำ",
+  "Checked by": "ผู้ตรวจสอบ",
+  "Approved by": "ผู้อนุมัติ",
+  "Date": "วันที่",
+  "Doc No": "เลขที่เอกสาร",
+  "Rev": "แก้ไขครั้งที่",
+  "Notes": "หมายเหตุ",
+  "Toolbox": "หน้าหลัก",
+  "Switch tool": "สลับเครื่องมือ",
+  "Menu": "เมนู",
+  "Use this as target capacity ↓": "ใช้ค่านี้เป็นเป้าหมายกำลังการผลิต ↓",
   "📂 Load File": "📂 โหลดไฟล์",
   "Saved.": "บันทึกแล้ว",
   "Loaded — you can keep editing.": "โหลดแล้ว — แก้ไขต่อได้เลย",
   "Couldn't read that file — is it a valid saved file from this tool?": "อ่านไฟล์นี้ไม่ได้ — ไฟล์นี้บันทึกจากเครื่องมือนี้หรือไม่?",
+  // ---- Extended UI translations (technical terms kept in English) ----
+  "Achievable service run": "Service run ที่ทำได้",
+  "Actual": "Actual (ค่าจริง)",
+  "Actual EBCT": "EBCT จริง",
+  "Actual achieved thickness": "ความหนาที่ได้จริง",
+  "Actual air (at set excess)": "อากาศจริง (ที่ excess air ที่ตั้ง)",
+  "Actual belt speed achieved": "ความเร็วสายพานที่ได้จริง",
+  "Actual screw speed achieved": "ความเร็ว screw ที่ได้จริง",
+  "Advance rate": "อัตราการเคลื่อนตัวของวัสดุ",
+  "Allowable soil bearing capacity": "กำลังรับน้ำหนักดินที่ยอมให้",
+  "Allowable stress S": "ค่าความเค้นที่ยอมให้ S",
+  "Allowed voltage drop": "แรงดันตกที่ยอมให้",
+  "Ambient relative humidity": "ความชื้นสัมพัทธ์อากาศแวดล้อม",
+  "Ambient temp.": "อุณหภูมิแวดล้อม",
+  "Ambient temperature": "อุณหภูมิแวดล้อม",
+  "Ash %": "เถ้า %",
+  "Ash (remainder)": "เถ้า (ส่วนที่เหลือ)",
+  "Attachment factor C": "แฟกเตอร์การยึด C",
+  "Average bed depth": "ความหนาชั้นเชื้อเพลิงเฉลี่ย",
+  "Backwash (surge) tank volume, min.": "ปริมาตรถังน้ำ backwash ขั้นต่ำ",
+  "Backwash duration": "เวลาล้างย้อน (backwash)",
+  "Backwash flow (Qbw)": "อัตราไหล backwash (Qbw)",
+  "Backwash pipe (calculated)": "ท่อ backwash (คำนวณได้)",
+  "Backwash pipe (standard size)": "ท่อ backwash (ขนาดมาตรฐาน)",
+  "Backwash pipe velocity (target)": "ความเร็วในท่อ backwash (เป้าหมาย)",
+  "Backwash pump duty": "อัตราไหลปั๊ม backwash",
+  "Backwash pump oversize factor": "แฟกเตอร์เผื่อปั๊ม backwash",
+  "Backwash rate (Rbw)": "Backwash rate (Rbw)",
+  "Backwash rate used (Rbw)": "Backwash rate ที่ใช้ (Rbw)",
+  "Backwash water temperature": "อุณหภูมิน้ำล้างย้อน",
+  "Backwash water volume / cycle": "ปริมาณน้ำล้างย้อนต่อครั้ง",
+  "Bag size": "ขนาดถุง",
+  "Bags to order": "จำนวนถุงที่ต้องสั่ง",
+  "Barometric pressure": "ความดันบรรยากาศ",
+  "Basis": "ฐานอ้างอิง (Basis)",
+  "Bearing pressure on soil": "แรงกดลงดิน (bearing pressure)",
+  "Bed volume": "ปริมาตรชั้นสารกรอง (bed)",
+  "Belt speed": "ความเร็วสายพาน",
+  "Belt weight (single strand)": "น้ำหนักสายพาน (ด้านเดียว)",
+  "Belt width": "ความกว้างสายพาน",
+  "Bin length (screw axis, constant)": "ความยาว bin (ตามแนวแกน screw)",
+  "Boiler capacity": "กำลังผลิตไอน้ำ (boiler capacity)",
+  "Boiler efficiency": "ประสิทธิภาพหม้อไอน้ำ",
+  "Bolt size": "ขนาดโบลท์",
+  "Bottom trough width": "ความกว้างรางก้นถัง",
+  "Brand": "ยี่ห้อ",
+  "Brick density": "ความหนาแน่นอิฐ",
+  "Brick size": "ขนาดอิฐ",
+  "Brick waste allowance": "เผื่อเศษอิฐ",
+  "Bricks per m² per layer": "จำนวนอิฐต่อ m² ต่อชั้น",
+  "Bricks required (as built)": "จำนวนอิฐที่ต้องใช้ (ตามแบบ)",
+  "Bricks to order (+ waste)": "จำนวนอิฐที่ต้องสั่ง (+เผื่อ)",
+  "Brine tank salt storage": "ปริมาณเกลือเก็บในถัง brine",
+  "Bulk density": "ความหนาแน่นรวม (bulk density)",
+  "CO2 (dry)": "CO2 (แห้ง)",
+  "Calculated running power": "กำลังขณะเดินเครื่อง (คำนวณ)",
+  "Capacity at this speed": "กำลังการผลิตที่ความเร็วนี้",
+  "Carbon brand": "ยี่ห้อ carbon",
+  "Carbon model/grade": "รุ่น/เกรด carbon",
+  "Castable type": "ชนิด castable",
+  "Category": "หมวด",
+  "Channel size (JIS)": "ขนาดเหล็กรางน้ำ (JIS)",
+  "Cleat pitch": "ระยะพิทช์ cleat",
+  "Colour": "สี",
+  "Combustion air humidity": "ความชื้นอากาศเผาไหม้",
+  "Combustion control": "ระบบควบคุมการเผาไหม้",
+  "Component type": "ชนิดชิ้นส่วน",
+  "Concrete density": "ความหนาแน่นคอนกรีต",
+  "Condensate flow": "อัตราไหลคอนเดนเสท",
+  "Condensate pressure (before trap)": "ความดันคอนเดนเสท (ก่อน trap)",
+  "Condition": "สภาพ",
+  "Conductor operating temp (resistivity)": "อุณหภูมิตัวนำขณะใช้งาน (resistivity)",
+  "Consumption rate": "อัตราการใช้",
+  "Control interface": "ส่วนติดต่อควบคุม",
+  "Controls description": "รายละเอียดระบบควบคุม",
+  "Conveyor length": "ความยาว conveyor",
+  "Conveyor length (slope)": "ความยาว conveyor (ตามแนวเอียง)",
+  "Corrosion allowance": "ค่าเผื่อการกัดกร่อน (CA)",
+  "Cross-section area (annulus)": "พื้นที่หน้าตัด (annulus)",
+  "Cross-sectional area": "พื้นที่หน้าตัด",
+  "Crown radius L/D": "รัศมี crown L/D",
+  "Custom K factor": "ค่า K กำหนดเอง",
+  "Cycle rate": "อัตรารอบ",
+  "Cycle time": "เวลาต่อรอบ",
+  "Cycle time (push→push)": "เวลาต่อรอบ (push→push)",
+  "Daily consumption": "ปริมาณใช้ต่อวัน",
+  "Delivered feed rate": "อัตราป้อนที่ได้จริง",
+  "Delivery": "การส่งมอบ",
+  "Density": "ความหนาแน่น",
+  "Depth": "ความลึก",
+  "Description / tag": "รายละเอียด / tag",
+  "Design code / certification": "มาตรฐานออกแบบ / การรับรอง",
+  "Design velocity": "ความเร็วออกแบบ",
+  "Desired residence time": "เวลาคงอยู่ที่ต้องการ (residence time)",
+  "Desired service run": "Service run ที่ต้องการ",
+  "Dew point": "จุดน้ำค้าง",
+  "Drive efficiency": "ประสิทธิภาพชุดขับ",
+  "Drive sprocket teeth (assumed)": "จำนวนฟันสเตอร์ขับ (สมมติ)",
+  "Driven sprocket": "สเตอร์ตาม",
+  "Dry bulb": "อุณหภูมิกระเปาะแห้ง",
+  "Dry bulb temperature": "อุณหภูมิกระเปาะแห้ง (DB)",
+  "Duct diameter": "เส้นผ่านศูนย์กลางท่อลม",
+  "Duct length": "ความยาวท่อลม",
+  "Duty per kg steam": "ความร้อนต่อ kg ไอน้ำ",
+  "Dwell": "หยุดพัก (dwell)",
+  "Edge margin (L / W, each side)": "ระยะเผื่อขอบ (L / W ต่อข้าง)",
+  "Edge margin beyond machine footprint (each side)": "ระยะเผื่อขอบเกินฐานเครื่อง (ต่อข้าง)",
+  "Effective usable volume": "ปริมาตรใช้งานได้จริง",
+  "Empty bed contact time (EBCT)": "Empty bed contact time (EBCT)",
+  "Engineering unit": "หน่วยวิศวกรรม",
+  "Engineering unit label": "ชื่อหน่วยวิศวกรรม",
+  "Engineering unit max": "หน่วยวิศวกรรม สูงสุด",
+  "Engineering unit min": "หน่วยวิศวกรรม ต่ำสุด",
+  "Enthalpy (h)": "เอนทาลปี (h)",
+  "Equivalent 15kg cylinders/day": "เทียบเท่าถัง 15 kg ต่อวัน",
+  "Equivalent steam loss": "เทียบเท่าไอน้ำที่สูญเสีย",
+  "Evaporation duty (feedwater → steam)": "ความร้อนผลิตไอน้ำ (feedwater → steam)",
+  "Excess air": "อากาศส่วนเกิน (excess air)",
+  "Excess air (solved)": "อากาศส่วนเกิน (คำนวณได้)",
+  "FAD (20°C, 65%RH, 1 atm)": "FAD (20°C, 65%RH, 1 atm)",
+  "Fan efficiency": "ประสิทธิภาพพัดลม",
+  "Feedwater pump control": "การควบคุมปั๊มน้ำป้อน",
+  "Feedwater temp.": "อุณหภูมิน้ำป้อน",
+  "Feedwater temperature": "อุณหภูมิน้ำป้อน",
+  "Feedwater temperature (for BHP calc)": "อุณหภูมิน้ำป้อน (สำหรับคำนวณ BHP)",
+  "Fill / shape factor": "แฟกเตอร์การบรรจุ / รูปทรง",
+  "Fill factor": "แฟกเตอร์การบรรจุ",
+  "Fill height": "ความสูงวัสดุที่บรรจุ",
+  "Fill length": "ความยาววัสดุที่บรรจุ",
+  "Fill width": "ความกว้างวัสดุที่บรรจุ",
+  "Firing rate": "อัตราเผาไหม้",
+  "Fitting type": "ชนิดข้อต่อ",
+  "Flash steam fraction": "สัดส่วน flash steam",
+  "Flash steam mass": "มวล flash steam",
+  "Flash steam volume (at P2)": "ปริมาตร flash steam (ที่ P2)",
+  "Flash vessel pressure (after)": "ความดัน flash vessel (หลัง)",
+  "Floor length": "ความยาวพื้น",
+  "Floor width": "ความกว้างพื้น",
+  "Floor/material friction coefficient": "สัมประสิทธิ์แรงเสียดทานพื้น/วัสดุ",
+  "Flow value": "ค่าอัตราไหล",
+  "Flue gas density at stack temp": "ความหนาแน่นไอเสียที่อุณหภูมิปล่อง",
+  "Flue gas flow (at firing rate)": "อัตราไหลไอเสีย (ที่ firing rate)",
+  "Flue gas mass": "มวลไอเสีย",
+  "Flue gas mass flow": "อัตราไหลมวลไอเสีย",
+  "Flue gas temperature": "อุณหภูมิไอเสีย",
+  "Flue gas volumetric flow": "อัตราไหลปริมาตรไอเสีย",
+  "Footprint area": "พื้นที่ฐาน",
+  "Force per cylinder": "แรงต่อกระบอกไฮดรอลิก",
+  "Foundation plan size": "ขนาดฐานราก (แปลน)",
+  "Foundation volume (concrete)": "ปริมาตรฐานราก (คอนกรีต)",
+  "Foundation weight": "น้ำหนักฐานราก",
+  "Friction HP (diameter/speed dependent)": "กำลังเสียดทาน (ขึ้นกับขนาด/ความเร็ว)",
+  "Friction condition (K factor)": "สภาพแรงเสียดทาน (K factor)",
+  "Friction factor": "แฟกเตอร์แรงเสียดทาน",
+  "Friction factor (idlers/rollers)": "แฟกเตอร์แรงเสียดทาน (ลูกกลิ้ง)",
+  "From": "จาก",
+  "Fuel": "เชื้อเพลิง",
+  "Fuel consumption": "ปริมาณใช้เชื้อเพลิง",
+  "Fuel flow": "อัตราป้อนเชื้อเพลิง",
+  "Fuel type": "ชนิดเชื้อเพลิง",
+  "Fuel type description": "รายละเอียดชนิดเชื้อเพลิง",
+  "Full cycle time (fwd + return)": "เวลาต่อรอบเต็ม (ไป + กลับ)",
+  "Full load current (FLA)": "กระแสพิกัดเต็มโหลด (FLA)",
+  "Full material bed weight on floor": "น้ำหนักวัสดุทั้งหมดบนพื้น",
+  "Gas density": "ความหนาแน่นก๊าซ",
+  "Geometry-derived capacity": "กำลังการผลิตจากรูปทรง",
+  "Grate width": "ความกว้างตะกรับ (grate)",
+  "Guideline max speed for this dia.": "ความเร็วสูงสุดแนะนำสำหรับขนาดนี้",
+  "H2O (wet basis)": "H2O (ฐานเปียก)",
+  "HHV, dry basis": "HHV ฐานแห้ง",
+  "Hanger bearing type": "ชนิด hanger bearing",
+  "Head A": "หัวถัง A",
+  "Head A MAWP": "MAWP หัวถัง A",
+  "Head A nominal thickness": "ความหนาหัวถัง A (nominal)",
+  "Head A volume": "ปริมาตรหัวถัง A",
+  "Head B": "หัวถัง B",
+  "Head B MAWP": "MAWP หัวถัง B",
+  "Head B nominal thickness": "ความหนาหัวถัง B (nominal)",
+  "Head B volume": "ปริมาตรหัวถัง B",
+  "Head depth (each)": "ความลึกหัวถัง (แต่ละด้าน)",
+  "Heat input": "ความร้อนเข้า",
+  "Heat loss per meter": "การสูญเสียความร้อนต่อเมตร",
+  "Heat output": "ความร้อนออก",
+  "Heating value basis (label only)": "ฐานค่าความร้อน (แสดงเป็น label เท่านั้น)",
+  "Height": "ความสูง",
+  "Hopper (taper) height": "ความสูง hopper (ส่วนสอบ)",
+  "Hopper (wedge) volume": "ปริมาตร hopper (wedge)",
+  "Humidity ratio (W)": "อัตราส่วนความชื้น (W)",
+  "Hydrogen, dry basis": "ไฮโดรเจน ฐานแห้ง",
+  "Hydrotest pressure (1.5×design P)": "ความดันทดสอบ hydrotest (1.5×design P)",
+  "Incline angle": "มุมเอียง",
+  "Incline derating factor": "แฟกเตอร์ลดค่าจากมุมเอียง",
+  "Indicative vibrator motor": "มอเตอร์สั่นแนะนำ (เบื้องต้น)",
+  "Inlet velocity": "ความเร็วทางเข้า",
+  "Inside diameter": "เส้นผ่านศูนย์กลางภายใน",
+  "Inside diameter (ID)": "เส้นผ่านศูนย์กลางภายใน (ID)",
+  "Installation": "การติดตั้ง",
+  "Installed brick weight": "น้ำหนักอิฐที่ติดตั้ง",
+  "Insulation density": "ความหนาแน่นฉนวน",
+  "Insulation thickness": "ความหนาฉนวน",
+  "Joint efficiency": "ประสิทธิภาพรอยเชื่อม (E)",
+  "Knuckle radius r/D": "รัศมี knuckle r/D",
+  "L1 — Dry flue gas": "L1 — ไอเสียแห้ง",
+  "L2 — H2 in fuel": "L2 — H2 ในเชื้อเพลิง",
+  "L3 — Moisture in fuel": "L3 — ความชื้นในเชื้อเพลิง",
+  "L4 — Moisture in air": "L4 — ความชื้นในอากาศ",
+  "L5 — Unburnt in ash": "L5 — เชื้อเพลิงไม่เผาไหม้ในเถ้า",
+  "L6 — Radiation & convection": "L6 — การแผ่รังสี & การพาความร้อน",
+  "L7 — Unaccounted": "L7 — อื่น ๆ ที่ไม่ได้คิด",
+  "LHV (as-fired)": "LHV (as-fired)",
+  "LHV as-fired": "LHV as-fired",
+  "Layer name": "ชื่อชั้น",
+  "Layers (courses deep)": "จำนวนชั้น (courses)",
+  "Leg/support height": "ความสูงขา/ฐานรองรับ",
+  "Length": "ความยาว",
+  "Lift height": "ความสูงยก",
+  "Linear velocity": "ความเร็วเชิงเส้น",
+  "Loading (fill) efficiency": "ประสิทธิภาพการบรรจุ (fill)",
+  "Location": "สถานที่",
+  "Machine footprint — length": "ฐานเครื่อง — ความยาว",
+  "Machine footprint — width": "ฐานเครื่อง — ความกว้าง",
+  "Machine type (sets minimum mass ratio)": "ชนิดเครื่องจักร (กำหนดอัตราส่วนมวลขั้นต่ำ)",
+  "Machine weight (dry, static)": "น้ำหนักเครื่องจักร (แห้ง, สถิต)",
+  "Main power supply": "ระบบไฟฟ้าหลัก",
+  "Manufacturer scope": "ขอบเขตงานผู้ผลิต",
+  "Mass delivered per push": "มวลที่ป้อนต่อการดันหนึ่งครั้ง",
+  "Mass flow": "อัตราไหลมวล",
+  "Mass flow at this speed": "อัตราไหลมวลที่ความเร็วนี้",
+  "Mass ratio (foundation ÷ machine)": "อัตราส่วนมวล (ฐานราก ÷ เครื่องจักร)",
+  "Material (bulk density)": "วัสดุ (bulk density)",
+  "Material HP (corrected)": "กำลังขนวัสดุ (ปรับแก้แล้ว)",
+  "Material HP (raw)": "กำลังขนวัสดุ (ดิบ)",
+  "Material bed height on floor": "ความสูงกองวัสดุบนพื้น",
+  "Material factor λ": "แฟกเตอร์วัสดุ λ",
+  "Material weight in hopper section": "น้ำหนักวัสดุในส่วน hopper",
+  "Measured O2 (dry flue gas)": "O2 ที่วัดได้ (ไอเสียแห้ง)",
+  "Measured O2 (dry, flue gas analyzer)": "O2 ที่วัดได้ (แห้ง, flue gas analyzer)",
+  "Milestone": "Milestone",
+  "Min. recommended angle from horizontal": "มุมต่ำสุดแนะนำจากแนวราบ",
+  "Minimum CSA for voltage drop": "พื้นที่หน้าตัดสายต่ำสุด (แรงดันตก)",
+  "Model": "รุ่น",
+  "Model/grade": "รุ่น/เกรด",
+  "Moist air density": "ความหนาแน่นอากาศชื้น",
+  "Moisture": "ความชื้น",
+  "Moisture %": "ความชื้น %",
+  "Moisture content": "ปริมาณความชื้น",
+  "Monthly consumption (30-day)": "ปริมาณใช้ต่อเดือน (30 วัน)",
+  "Mortar (wet) density": "ความหนาแน่นปูน (เปียก)",
+  "Mortar bag size": "ขนาดถุงปูน",
+  "Mortar bags to order": "จำนวนถุงปูนที่ต้องสั่ง",
+  "Mortar joint thickness": "ความหนารอยต่อปูน",
+  "Mortar volume": "ปริมาตรปูน",
+  "Mortar weight": "น้ำหนักปูน",
+  "Motor rating": "พิกัดมอเตอร์",
+  "Motor sync speed": "ความเร็วซิงโครนัสมอเตอร์",
+  "N2 (dry)": "N2 (แห้ง)",
+  "Nearest standard motor": "มอเตอร์มาตรฐานที่ใกล้ที่สุด",
+  "Net resistance after natural draft": "ความต้านทานสุทธิหลังหัก natural draft",
+  "Nm³ (0°C, dry, 1 atm)": "Nm³ (0°C, แห้ง, 1 atm)",
+  "Nominal pipe size (NPS)": "ขนาดท่อ nominal (NPS)",
+  "Number of hydraulic cylinders": "จำนวนกระบอกไฮดรอลิก",
+  "Number of screws": "จำนวน screw",
+  "O2 (dry)": "O2 (แห้ง)",
+  "O2 in flue gas": "O2 ในไอเสีย",
+  "One-way cable length": "ความยาวสายไฟ (ทางเดียว)",
+  "Ordered brick weight (+ waste)": "น้ำหนักอิฐที่สั่ง (+เผื่อ)",
+  "Outer jacket / cladding": "แจ็คเก็ต / เปลือกหุ้มภายนอก",
+  "Outer surface temperature": "อุณหภูมิผิวนอก",
+  "Outside diameter (OD)": "เส้นผ่านศูนย์กลางภายนอก (OD)",
+  "Overall height (incl. legs)": "ความสูงรวม (รวมขา)",
+  "Overall length (approx.)": "ความยาวรวม (โดยประมาณ)",
+  "Overall reduction required": "อัตราทดรวมที่ต้องการ",
+  "Overload correction factor": "แฟกเตอร์ปรับแก้ overload",
+  "PLC raw count": "ค่า raw count ของ PLC",
+  "PLC raw count max": "raw count PLC สูงสุด",
+  "PLC raw count min": "raw count PLC ต่ำสุด",
+  "Pipe material": "วัสดุท่อ",
+  "Pipe outside diameter": "เส้นผ่านศูนย์กลางภายนอกท่อ",
+  "Pipe run length": "ความยาวแนวท่อ",
+  "Pitch": "พิทช์",
+  "Pocket fill volume": "ปริมาตรวัสดุต่อช่อง (pocket)",
+  "Pockets discharged": "จำนวนช่องที่จ่ายออก",
+  "Power factor": "เพาเวอร์แฟกเตอร์",
+  "Power to lift material": "กำลังยกวัสดุ",
+  "Power — idler/roller friction": "กำลัง — แรงเสียดทานลูกกลิ้ง",
+  "Power — sidewall/skirt rubbing": "กำลัง — แรงเสียดสี sidewall/skirt",
+  "Pressure": "ความดัน",
+  "Pressure (abs)": "ความดัน (สัมบูรณ์)",
+  "Pressure drop": "ความดันตก",
+  "Primer": "สีรองพื้น",
+  "Process / surface temperature": "อุณหภูมิกระบวนการ / ผิว",
+  "Project Owner scope": "ขอบเขตงานเจ้าของโครงการ",
+  "Proof stress": "Proof stress",
+  "Property class": "ชั้นคุณภาพ (property class)",
+  "Pulley diameter": "เส้นผ่านศูนย์กลางพูลเลย์",
+  "Push": "ดัน (push)",
+  "Push (extend) time": "เวลาดัน (extend)",
+  "Pushes per hour": "จำนวนครั้งดันต่อชั่วโมง",
+  "Qty": "จำนวน",
+  "Radiation & convection (surface loss)": "การแผ่รังสี & การพาความร้อน (สูญเสียที่ผิว)",
+  "Ram cross-section": "พื้นที่หน้าตัด ram",
+  "Ram stroke": "ระยะชัก ram",
+  "Rating/Sch.": "Rating/Sch.",
+  "Ratio D/2h": "อัตราส่วน D/2h",
+  "Recommended torque": "แรงบิดแนะนำ",
+  "Regenerations per week (approx.)": "จำนวน regeneration ต่อสัปดาห์ (ประมาณ)",
+  "Regenerations to store in brine tank": "จำนวน regeneration ที่เก็บในถัง brine",
+  "Relative humidity": "ความชื้นสัมพัทธ์",
+  "Remaining condensate": "คอนเดนเสทที่เหลือ",
+  "Required capacity per screw": "กำลังการผลิตต่อ screw ที่ต้องการ",
+  "Required centrifugal force": "แรงหนีศูนย์ที่ต้องการ",
+  "Required dwell (pause) time": "เวลาหยุดพักที่ต้องการ",
+  "Required firing rate": "อัตราเผาไหม้ที่ต้องการ",
+  "Required fuel": "เชื้อเพลิงที่ต้องการ",
+  "Required grate speed": "ความเร็วตะกรับที่ต้องการ",
+  "Required motor power": "กำลังมอเตอร์ที่ต้องการ",
+  "Required pulley speed": "ความเร็วพูลเลย์ที่ต้องการ",
+  "Required system resistance": "ความต้านทานระบบที่ต้องการ",
+  "Required thickness": "ความหนาที่ต้องการ",
+  "Resin brand": "ยี่ห้อเรซิน",
+  "Resin model": "รุ่นเรซิน",
+  "Resin operating capacity": "ความจุใช้งานเรซิน",
+  "Resin volume required": "ปริมาตรเรซินที่ต้องการ",
+  "Response": "การตอบสนอง",
+  "Retract": "ดึงกลับ (retract)",
+  "Retract time": "เวลาดึงกลับ",
+  "Rev.": "Rev.",
+  "Runtime at set consumption": "ระยะเวลาใช้งานที่อัตราการใช้ที่ตั้ง",
+  "SO2 (dry)": "SO2 (แห้ง)",
+  "Salt dose": "ปริมาณเกลือ (salt dose)",
+  "Salt required per regeneration": "เกลือที่ใช้ต่อ regeneration",
+  "Sand effective size (d₁₀)": "ขนาดเม็ดทราย effective size (d₁₀)",
+  "Sand media brand": "ยี่ห้อทรายกรอง",
+  "Sand media model/grade": "รุ่น/เกรดทรายกรอง",
+  "Saturation pressure": "ความดันอิ่มตัว",
+  "Saturation temp": "อุณหภูมิอิ่มตัว",
+  "Saturation temperature": "อุณหภูมิอิ่มตัว",
+  "Schedule": "Schedule",
+  "Screw outer dia.": "เส้นผ่านศูนย์กลางนอก screw",
+  "Screw speed": "ความเร็ว screw",
+  "Section title": "ชื่อหัวข้อ",
+  "Selected gearbox ratio": "อัตราทดเกียร์ที่เลือก",
+  "Selected standard motor": "มอเตอร์มาตรฐานที่เลือก",
+  "Service factor": "Service factor",
+  "Service velocity": "ความเร็วกรอง (service velocity)",
+  "Shaft dia.": "เส้นผ่านศูนย์กลางเพลา",
+  "Shaft power (÷ drive eff.)": "กำลังที่เพลา (÷ ประสิทธิภาพชุดขับ)",
+  "Shaft/pipe dia.": "เส้นผ่านศูนย์กลางเพลา/ท่อ",
+  "Sheet weight": "น้ำหนักแผ่น",
+  "Shell (circumferential)": "Shell (แนวเส้นรอบวง)",
+  "Shell MAWP": "MAWP ของ shell",
+  "Shell nominal thickness": "ความหนา shell (nominal)",
+  "Shell volume": "ปริมาตร shell",
+  "Shell/head material": "วัสดุ shell/หัวถัง",
+  "Sidewall height": "ความสูง sidewall",
+  "Sidewall/skirt rubbing resistance": "แรงต้านเสียดสี sidewall/skirt",
+  "Signal": "สัญญาณ",
+  "Signal max": "สัญญาณสูงสุด",
+  "Signal min": "สัญญาณต่ำสุด",
+  "Size": "ขนาด",
+  "Sizing multiplier (force ÷ static weight)": "ตัวคูณขนาด (แรง ÷ น้ำหนักสถิต)",
+  "Slat stroke length": "ระยะชักของ slat",
+  "Sm³ (15°C, dry, 1 atm)": "Sm³ (15°C, แห้ง, 1 atm)",
+  "Specific volume (v)": "ปริมาตรจำเพาะ (v)",
+  "Speed deviation from target": "ความเร็วเบี่ยงเบนจากเป้าหมาย",
+  "Sprocket trim ratio needed": "อัตราทดสเตอร์ปรับแต่งที่ต้องการ",
+  "Stack height": "ความสูงปล่อง",
+  "Statement (auto-drafted, edit freely)": "ข้อความ (ร่างอัตโนมัติ แก้ไขได้)",
+  "Steam capacity": "กำลังผลิตไอน้ำ",
+  "Steam enthalpy (hg)": "เอนทาลปีไอน้ำ (hg)",
+  "Steam flow": "อัตราไหลไอน้ำ",
+  "Steam pressure": "ความดันไอน้ำ",
+  "Steam temperature": "อุณหภูมิไอน้ำ",
+  "Storage mass capacity": "ความจุมวลที่เก็บได้",
+  "Straight flange (per head)": "Straight flange (ต่อหัวถัง)",
+  "Straight section volume": "ปริมาตรส่วนตรง",
+  "Straight shell height": "ความสูงส่วนตรงของ shell",
+  "Straight wall height": "ความสูงผนังส่วนตรง",
+  "Strokes to traverse zone": "จำนวนชักที่ใช้ผ่านโซน",
+  "Suggested Zone 1 speed": "ความเร็วโซน 1 ที่แนะนำ",
+  "Suggested brine tank volume (salt + 50% water space)": "ปริมาตรถัง brine แนะนำ (เกลือ + พื้นที่น้ำ 50%)",
+  "Suggested pipe size": "ขนาดท่อแนะนำ",
+  "Supply voltage": "แรงดันไฟฟ้า",
+  "Surface preparation": "การเตรียมผิว",
+  "Surface temperature safety limit": "ขีดจำกัดอุณหภูมิผิวเพื่อความปลอดภัย",
+  "Tank tag": "Tag ถัง",
+  "Tanks backwashed simultaneously": "จำนวนถังที่ backwash พร้อมกัน",
+  "Tan–tan length": "ความยาว tan–tan",
+  "Target capacity": "กำลังการผลิตเป้าหมาย",
+  "Target mass flow": "อัตราไหลมวลเป้าหมาย",
+  "Target preload": "แรงดึงเบื้องต้นเป้าหมาย (preload)",
+  "Target utilization of proof load": "สัดส่วนใช้งานของ proof load",
+  "Temperature": "อุณหภูมิ",
+  "Tensile stress area": "พื้นที่รับแรงดึง",
+  "Theoretical air": "อากาศทฤษฎี",
+  "Theoretical natural draft": "Natural draft ทางทฤษฎี",
+  "Thickness": "ความหนา",
+  "To": "ถึง",
+  "Top width (tapers)": "ความกว้างด้านบน (ส่วนสอบ)",
+  "Topcoat": "สีทับหน้า",
+  "Total dead load (machine + foundation)": "น้ำหนักบรรทุกคงที่รวม (เครื่อง + ฐานราก)",
+  "Total friction/push force required": "แรงเสียดทาน/แรงดันรวมที่ต้องการ",
+  "Total geometric volume": "ปริมาตรรวมทางเรขาคณิต",
+  "Total heat duty": "ความร้อนรวม",
+  "Total heat loss": "การสูญเสียความร้อนรวม",
+  "Total losses": "การสูญเสียรวม",
+  "Total volume": "ปริมาตรรวม",
+  "Total ΔP": "ΔP รวม",
+  "Trigger": "ตัวกระตุ้น (trigger)",
+  "Type": "ชนิด",
+  "Unaccounted-for losses": "การสูญเสียที่ไม่ได้คิด",
+  "Unburnt combustibles in ash": "เชื้อเพลิงไม่เผาไหม้ในเถ้า",
+  "Underdrain/distributor space": "พื้นที่ underdrain/distributor",
+  "Unit": "หน่วย",
+  "Unit weight": "น้ำหนักต่อหน่วย",
+  "Validity": "อายุการเสนอราคา",
+  "Value": "ค่า",
+  "Valve type": "ชนิดวาล์ว",
+  "Velocity": "ความเร็ว",
+  "Velocity heads (Nh)": "Velocity heads (Nh)",
+  "Vessel diameter": "เส้นผ่านศูนย์กลางถัง",
+  "Vessel inside diameter": "เส้นผ่านศูนย์กลางภายในถัง",
+  "Volume": "ปริมาตร",
+  "Volumetric capacity": "กำลังการผลิตเชิงปริมาตร",
+  "Wall angle from horizontal": "มุมผนังจากแนวราบ",
+  "Wall angle from vertical": "มุมผนังจากแนวดิ่ง",
+  "Wall area": "พื้นที่ผนัง",
+  "Wall thickness": "ความหนาผนัง",
+  "Warranty period": "ระยะเวลารับประกัน",
+  "Warranty terms": "เงื่อนไขการรับประกัน",
+  "Waste allowance": "ค่าเผื่อสูญเสีย",
+  "Water addition": "ปริมาณน้ำที่ผสม",
+  "Water required (approx.)": "น้ำที่ต้องใช้ (ประมาณ)",
+  "Weight (as-designed)": "น้ำหนัก (ตามแบบ)",
+  "Weight per m²": "น้ำหนักต่อ m²",
+  "Weight to order (+ waste)": "น้ำหนักที่ต้องสั่ง (+เผื่อ)",
+  "Wet bulb": "อุณหภูมิกระเปาะเปียก",
+  "Wet bulb temperature": "อุณหภูมิกระเปาะเปียก (WB)",
+  "Width": "ความกว้าง",
+  "With service factor": "รวม service factor",
+  "Zone label": "ชื่อโซน",
+  "Zone length": "ความยาวโซน",
+  "hf (feedwater, approx.)": "hf (น้ำป้อน, ประมาณ)",
+  "hf (sat. liquid)": "hf (ของเหลวอิ่มตัว)",
+  "hf at P1": "hf ที่ P1",
+  "hf at P2": "hf ที่ P2",
+  "hfg (latent heat)": "hfg (ความร้อนแฝง)",
+  "hfg at P2": "hfg ที่ P2",
+  "hg (sat. vapor)": "hg (ไออิ่มตัว)",
+  "hg (sat. vapour)": "hg (ไออิ่มตัว)",
+  "hg (steam)": "hg (ไอน้ำ)",
+  "vg (specific volume)": "vg (ปริมาตรจำเพาะ)",
+  "2b. Backwash Design (ANSI/AWWA B100-16)": "2b. ออกแบบ Backwash (ANSI/AWWA B100-16)",
+  "Actual (measured) conditions": "สภาวะจริง (ที่วัดได้)",
+  "Additional components (manual)": "อุปกรณ์เพิ่มเติม (กรอกเอง)",
+  "Autonomy": "ระยะเวลาสำรอง (autonomy)",
+  "Beam weight": "น้ำหนักเหล็กคาน",
+  "Brick & mortar quantities": "ปริมาณอิฐ & ปูน",
+  "Castable quantities": "ปริมาณ castable",
+  "Channel weight": "น้ำหนักเหล็กรางน้ำ",
+  "Combustion result": "ผลการเผาไหม้",
+  "Component list": "รายการอุปกรณ์",
+  "Converted flow (all bases)": "อัตราไหลที่แปลงแล้ว (ทุกฐาน)",
+  "Dimensions": "ขนาด",
+  "Draft & fan result": "ผล draft & พัดลม",
+  "Drive selection result": "ผลการเลือกชุดขับ",
+  "Efficiency (direct method)": "ประสิทธิภาพ (วิธี direct)",
+  "Estimated drive power": "กำลังชุดขับโดยประมาณ",
+  "Excess air / O2": "อากาศส่วนเกิน / O2",
+  "Feed mechanism result": "ผลกลไกป้อนเชื้อเพลิง",
+  "Feed mechanism — engineering trade-offs": "กลไกป้อนเชื้อเพลิง — ข้อพิจารณาทางวิศวกรรม",
+  "Filter type": "ชนิดถังกรอง",
+  "Fuel input": "เชื้อเพลิงเข้า",
+  "Fuel ultimate analysis (as-fired, wt%)": "Ultimate analysis เชื้อเพลิง (as-fired, wt%)",
+  "Gear ratio / sprocket selection": "เลือกอัตราทดเกียร์ / สเตอร์",
+  "Hopper wall flow check": "ตรวจสอบการไหลที่ผนัง hopper",
+  "Hydraulic push force (estimate)": "แรงดันไฮดรอลิก (ประมาณ)",
+  "Hydraulic timing result": "ผลจังหวะไฮดรอลิก",
+  "Input flow": "อัตราไหลเข้า",
+  "Inputs — combustion & draft": "ข้อมูลนำเข้า — การเผาไหม้ & draft",
+  "Known values": "ค่าที่ทราบ",
+  "MAWP check (at nominal thickness)": "ตรวจสอบ MAWP (ที่ความหนา nominal)",
+  "Manual loss inputs": "การสูญเสียที่กรอกเอง",
+  "Mechanical dimensions": "ขนาดทางกล",
+  "Media layers (computed)": "ชั้นสารกรอง (คำนวณ)",
+  "Moist air properties": "คุณสมบัติอากาศชื้น",
+  "Nozzle schedule": "ตาราง nozzle",
+  "Paint / coating": "สี / การเคลือบ",
+  "Plate weight": "น้ำหนักเหล็กแผ่น",
+  "Power & motor selection": "กำลัง & การเลือกมอเตอร์",
+  "Reclaim screw result": "ผล reclaim screw",
+  "Required thickness (ASME Sec. VIII Div.1)": "ความหนาที่ต้องการ (ASME Sec. VIII Div.1)",
+  "Rough general arrangement (3 views)": "แบบจัดวางคร่าว ๆ (3 มุมมอง)",
+  "Saturated steam properties": "คุณสมบัติไอน้ำอิ่มตัว",
+  "Saturated steam table": "ตารางไอน้ำอิ่มตัว",
+  "Section": "หน้าตัด",
+  "Shape": "รูปทรง",
+  "Sizing inputs": "ข้อมูลสำหรับคำนวณขนาด",
+  "Speed & mass flow result": "ผลความเร็ว & อัตราไหลมวล",
+  "Steam duty": "ภาระไอน้ำ (steam duty)",
+  "Steam output": "ไอน้ำที่ผลิต",
+  "Suggested reinforcement (nominal)": "เหล็กเสริมแนะนำ (nominal)",
+  "Temperatures & ambient air": "อุณหภูมิ & อากาศแวดล้อม",
+  "Thickness comparison": "เปรียบเทียบความหนา",
+  "Total system resistance": "ความต้านทานรวมของระบบ",
+  "Vibration motor result": "ผลมอเตอร์สั่น",
+  "Volume & storage capacity": "ปริมาตร & ความจุจัดเก็บ",
+  "Weight (for structural / handling reference)": "น้ำหนัก (สำหรับอ้างอิงโครงสร้าง / การยก)",
+  "Belt & pocket geometry": "รูปทรงสายพาน & ช่องบรรจุ",
+  "Boiler": "หม้อไอน้ำ",
+  "Boiler duty → required firing rate": "ภาระหม้อไอน้ำ → อัตราเผาไหม้ที่ต้องการ",
+  "Brick": "อิฐ",
+  "Cable (voltage drop check)": "สายไฟ (ตรวจสอบแรงดันตก)",
+  "Castable": "Castable",
+  "Design conditions (ASME BPVC Sec. VIII Div. 1)": "เงื่อนไขออกแบบ (ASME BPVC Sec. VIII Div. 1)",
+  "Draft & ID/FD fan": "Draft & พัดลม ID/FD",
+  "Drive selection": "การเลือกชุดขับ",
+  "Floor & material": "พื้น & วัสดุ",
+  "For power estimate": "สำหรับประมาณกำลัง",
+  "Fuel feed mechanism": "กลไกป้อนเชื้อเพลิง",
+  "Fuel type & moisture": "ชนิดเชื้อเพลิง & ความชื้น",
+  "Gear ratio / sprocket": "อัตราทดเกียร์ / สเตอร์",
+  "Grate bed geometry": "รูปทรงชั้นตะกรับ",
+  "Head A (left)": "หัวถัง A (ซ้าย)",
+  "Head B (right)": "หัวถัง B (ขวา)",
+  "Hopper geometry (straight + wedge)": "รูปทรง hopper (ส่วนตรง + wedge)",
+  "Insulation material": "วัสดุฉนวน",
+  "Interlocks & alarms": "Interlock & สัญญาณเตือน",
+  "Known value": "ค่าที่ทราบ",
+  "Layout & resistance": "การจัดวาง & ความต้านทาน",
+  "Material & consumption": "วัสดุ & อัตราการใช้",
+  "Material & duty": "วัสดุ & ภาระงาน",
+  "Material list": "รายการวัสดุ",
+  "Motor": "มอเตอร์",
+  "Nozzle table": "ตาราง nozzle",
+  "Payment milestones": "งวดการชำระเงิน",
+  "Ranges": "ช่วงค่า",
+  "Reclaim screw feeder": "Reclaim screw feeder",
+  "Screw geometry": "รูปทรง screw",
+  "Sensitivity (price ex-VAT at margin %)": "ความไว (ราคาไม่รวม VAT ที่ margin %)",
+  "Shell geometry": "รูปทรง shell",
+  "Solve for": "คำนวณหา",
+  "Specs": "สเปค",
+  "Stroke & cycle": "ระยะชัก & รอบ",
+  "Surface": "ผิว",
+  "Vibration motor (anti-bridging)": "มอเตอร์สั่น (กัน bridging)",
+  "Wall": "ผนัง",
+  "Warranty": "การรับประกัน",
+  "Zone settings": "ตั้งค่าโซน",
+  "Bearing pressure": "แรงกดดิน",
+  "Duty": "ภาระงาน",
+  "Efficiency (direct)": "ประสิทธิภาพ (direct)",
+  "Efficiency (indirect)": "ประสิทธิภาพ (indirect)",
+  "Enthalpy": "เอนทาลปี",
+  "Equiv. evaporation": "อัตราระเหยเทียบเท่า",
+  "Equiv. steam loss": "ไอน้ำสูญเสียเทียบเท่า",
+  "Flow": "อัตราไหล",
+  "Heat loss": "การสูญเสียความร้อน",
+  "Mass ratio": "อัตราส่วนมวล",
+  "Overall height": "ความสูงรวม",
+  "Push force (total)": "แรงดัน (รวม)",
+  "Speed": "ความเร็ว",
+  "Surface temp": "อุณหภูมิผิว",
+  "Timing": "จังหวะเวลา",
+  "Torque": "แรงบิด",
+  "Total residence": "เวลาคงอยู่รวม",
+  "Weight": "น้ำหนัก",
+  "Storage": "การจัดเก็บ",
+  "Water": "น้ำ",
+  "Freeboard / water": "Freeboard / น้ำ",
+  "Total bed depth (all layers)": "ความหนาชั้นสารกรองรวม (ทุกชั้น)",
+  "Vessel ⌀": "⌀ ถัง",
+  "Shell t": "ความหนา shell",
+  "Steam Tsat": "Tsat ไอน้ำ",
+  "Fan motor": "มอเตอร์พัดลม",
+  "Reclaim motor": "มอเตอร์ reclaim",
+  "Flash steam": "Flash steam",
+  "Cost basis": "ฐานต้นทุน",
+  "Price ex-VAT": "ราคาไม่รวม VAT",
+  "Inc. VAT": "รวม VAT",
+  "Landed (cash)": "ต้นทุนถึงโรงงาน (เงินสด)",
+  "Per unit ex-VAT": "ต่อหน่วย ไม่รวม VAT",
+  "Ex-VAT cost": "ต้นทุนไม่รวม VAT",
+  "Recommended": "แนะนำ",
+  "Min. CSA (V-drop)": "CSA ต่ำสุด (แรงดันตก)",
+  "0 = cash/TT upfront.": "0 = ชำระเงินสด/TT ล่วงหน้า",
+  "0 = customer pays cash on delivery.": "0 = ลูกค้าชำระเงินสดเมื่อส่งมอบ",
+  "0.06 = standard 6% knuckle.": "0.06 = knuckle มาตรฐาน 6%",
+  "0.15 (abrasive/sluggish) – 0.45 (free-flowing, non-abrasive). Biomass chips/sawdust ≈ 0.30–0.35.": "0.15 (กัดกร่อน/ไหลยาก) – 0.45 (ไหลอิสระ ไม่กัดกร่อน) ชีวมวล chips/ขี้เลื่อย ≈ 0.30–0.35",
+  "0.3–0.5 typical for biomass on a steel/UHMW-lined floor.": "ทั่วไป 0.3–0.5 สำหรับชีวมวลบนพื้นเหล็ก/บุ UHMW",
+  "1.0 = standard ASME F&D.": "1.0 = ASME F&D มาตรฐาน",
+  "1.5–2.5 m/s typical; 1.5–2.0 m/s common.": "ทั่วไป 1.5–2.5 m/s นิยมใช้ 1.5–2.0 m/s",
+  "100psi (6.9 barg) is a common standard FRP/carbon steel filter vessel rating.": "100 psi (6.9 barg) เป็นพิกัดมาตรฐานทั่วไปของถังกรอง FRP/เหล็กกล้า",
+  "101.325 kPa at sea level; reduce for elevation.": "101.325 kPa ที่ระดับน้ำทะเล ลดลงตามระดับความสูง",
+  "10–20% above Qbw is typical (e.g. 1.2× → Qpump = 1.2 × Qbw).": "ทั่วไปเผื่อ 10–20% จาก Qbw (เช่น 1.2× → Qpump = 1.2 × Qbw)",
+  "120g/L (low, ~1.0-1.3eq/L) to 250g/L (high, ~1.7-2.0eq/L).": "120 g/L (ต่ำ ~1.0–1.3 eq/L) ถึง 250 g/L (สูง ~1.7–2.0 eq/L)",
+  "150–300mm typical so anchor bolts/baseplate sit clear of the foundation edge.": "ทั่วไป 150–300 mm เพื่อให้ anchor bolt/baseplate ห่างจากขอบฐานราก",
+  "1–2 m/s typical for water service.": "ทั่วไป 1–2 m/s สำหรับงานน้ำ",
+  "2,400 kg/m³ is the standard assumption for normal-weight concrete.": "2,400 kg/m³ เป็นค่ามาตรฐานของคอนกรีตน้ำหนักปกติ",
+  "2.0 = standard 2:1 semi-elliptical head.": "2.0 = หัวถัง 2:1 semi-elliptical มาตรฐาน",
+  "27648 is common for Siemens/Delta scaled analog input; adjust for your PLC.": "27648 เป็นค่าทั่วไปของ analog input Siemens/Delta ปรับตาม PLC ที่ใช้",
+  "2–3% for a motor feeder is a common target; check your site standard.": "2–3% สำหรับสายป้อนมอเตอร์เป็นเป้าหมายทั่วไป ตรวจสอบมาตรฐานหน้างาน",
+  "5–10 min for dechlorination, 10–20 min for organics removal.": "5–10 นาที สำหรับกำจัดคลอรีน, 10–20 นาที สำหรับกำจัดสารอินทรีย์",
+  "60°C is a common personnel-protection ('touch-safe') target; some standards use 50°C.": "60°C เป็นเป้าหมายทั่วไปเพื่อความปลอดภัยของบุคคล (สัมผัสได้) บางมาตรฐานใช้ 50°C",
+  "6–10 typical for a well-designed multicyclone; confirm against the specific unit's data.": "ทั่วไป 6–10 สำหรับ multicyclone ที่ออกแบบดี ยืนยันกับข้อมูลของอุปกรณ์จริง",
+  "75% of proof load is a common assembly target; adjust per your standard/spec.": "75% ของ proof load เป็นเป้าหมายประกอบทั่วไป ปรับตามมาตรฐาน/สเปค",
+  "ANSI/AWWA B100-16 Table 1, fluidization rate for d₆₀≈0.7mm SG=2.65 sand. Interpolated between 5–30°C.": "ANSI/AWWA B100-16 ตาราง 1, fluidization rate สำหรับทราย d₆₀≈0.7 mm SG=2.65 ประมาณค่าระหว่าง 5–30°C",
+  "Admin, warehousing, sales effort share.": "ส่วนแบ่งค่าบริหาร คลังสินค้า และงานขาย",
+  "Along belt travel, ≤ cleat pitch.": "ตามแนวสายพาน ≤ ระยะพิทช์ cleat",
+  "Biggest single lever on both LHV and required firing rate — use the actual batch value if known.": "ตัวแปรที่มีผลมากที่สุดต่อทั้ง LHV และอัตราเผาไหม้ — ใช้ค่าจริงของล็อตเชื้อเพลิงหากทราบ",
+  "Bin/trailer length — sets total storage, used for the push-force estimate.": "ความยาว bin/รถพ่วง — กำหนดปริมาณจัดเก็บรวม ใช้ประมาณแรงดัน",
+  "Boiler/process fuel burn rate — also drives the reclaim screw sizing below.": "อัตราการใช้เชื้อเพลิงของหม้อไอน้ำ/กระบวนการ — ใช้กำหนดขนาด reclaim screw ด้านล่างด้วย",
+  "Breakage/cutting allowance — 5–10% typical.": "เผื่อแตก/ตัด — ทั่วไป 5–10%",
+  "Check the HS code in the Thai Customs tariff — rates vary widely (0–30%+). FTA certificate must accompany the shipment to claim 0%.": "ตรวจสอบพิกัด HS ในอัตราศุลกากรไทย — อัตราต่างกันมาก (0–30%+) ต้องมีหนังสือรับรอง FTA แนบมากับสินค้าเพื่อขอ 0%",
+  "Check the Steel Properties tab for standard pipe OD by NPS/schedule.": "ดู OD ท่อมาตรฐานตาม NPS/schedule ได้ที่แท็บ Steel Properties",
+  "Default 33°C is a typical Thailand hot-season day — adjust for your site.": "ค่าเริ่มต้น 33°C คือวันหน้าร้อนทั่วไปในไทย ปรับตามหน้างาน",
+  "Default 33°C represents a typical hot-season day in Thailand — adjust for your actual site design condition.": "ค่าเริ่มต้น 33°C แทนวันหน้าร้อนทั่วไปในไทย ปรับตามเงื่อนไขออกแบบหน้างานจริง",
+  "Depth of material actively being conveyed off the floor — usually well below full bin height once the pile has sloughed to its angle of repose.": "ความสูงของวัสดุที่ถูกลำเลียงออกจากพื้น — มักต่ำกว่าความสูง bin เต็มมากเมื่อกองวัสดุไหลลงถึงมุมกองตัว",
+  "Design-guide rate at 30°C water. Interpolated between 0.5–1.0mm.": "อัตราตามคู่มือออกแบบที่น้ำ 30°C ประมาณค่าระหว่าง 0.5–1.0 mm",
+  "Drag from rubbing skirts/seals against the sidewalls — usually the dominant resistance term on this belt type, and roughly independent of load. Verify against seal type/pressure; 150–600 N/m is a common range.": "แรงต้านจาก skirt/seal เสียดสีกับ sidewall — มักเป็นเทอมความต้านทานหลักของสายพานชนิดนี้ และแทบไม่ขึ้นกับโหลด ตรวจสอบตามชนิด seal/แรงกด ช่วงทั่วไป 150–600 N/m",
+  "Enter 0 to skip.": "ใส่ 0 เพื่อข้าม",
+  "Enter as-fired GCV or NCV per your lab report; the calc uses whichever you enter.": "ใส่ GCV หรือ NCV (as-fired) ตามผลแล็บ การคำนวณจะใช้ค่าที่ใส่",
+  "Feed chute/ram bore area.": "พื้นที่หน้าตัดราง/กระบอก ram",
+  "For evaporation duty below (approx. cp×T for subcooled liquid).": "สำหรับภาระการระเหยด้านล่าง (ประมาณ cp×T สำหรับของเหลว subcooled)",
+  "Fraction of belt-width × sidewall-height box actually filled. 0.45–0.65 typical for cleated sidewall belts.": "สัดส่วนของกล่อง (กว้างสายพาน × สูง sidewall) ที่บรรจุจริง ทั่วไป 0.45–0.65 สำหรับสายพาน sidewall แบบมี cleat",
+  "From geotechnical report if available. 1 ksc (kg/cm²) = 10 t/m² — typical compacted fill/soil ranges roughly 5–20 t/m², but confirm for the actual site.": "จากรายงานธรณีเทคนิคหากมี 1 ksc (kg/cm²) = 10 t/m² — ดินถมบดอัดทั่วไปประมาณ 5–20 t/m² แต่ต้องยืนยันตามหน้างานจริง",
+  "GAC expands 30–50% during backwash.": "GAC ขยายตัว 30–50% ขณะ backwash",
+  "Higher heating value of the bone-dry fuel — a proximate/ultimate analysis certificate gives this precisely.": "ค่าความร้อนสูง (HHV) ของเชื้อเพลิงแห้งสนิท — ใบรับรอง proximate/ultimate analysis ให้ค่านี้ได้แม่นยำ",
+  "Hydraulic cylinder forward stroke time.": "เวลาชักไปข้างหน้าของกระบอกไฮดรอลิก",
+  "Include baseplate/skid if it's poured integrally with the foundation.": "รวม baseplate/skid หากหล่อเป็นชิ้นเดียวกับฐานราก",
+  "Into the wall thickness direction.": "ในทิศทางความหนาผนัง",
+  "Live-bottom reclaim screws typically run lower fill (0.15–0.25) than transfer screws since they draw unevenly along the trough.": "Reclaim screw แบบ live-bottom มัก fill ต่ำกว่า (0.15–0.25) เนื่องจากดึงวัสดุไม่สม่ำเสมอตามราง",
+  "Margin for starting torque under a full/loaded screw, wear, and minor blockages. 1.15–1.5 typical.": "เผื่อแรงบิดสตาร์ทขณะ screw เต็ม/มีโหลด การสึกหรอ และการอุดตันเล็กน้อย ทั่วไป 1.15–1.5",
+  "Margin for starting torque under a loaded screw, wear, and blockages. 1.15–1.5 typical.": "เผื่อแรงบิดสตาร์ทขณะมีโหลด การสึกหรอ และการอุดตัน ทั่วไป 1.15–1.5",
+  "Needs ash sampling (carbon content, GCV of ash) to derive rigorously — enter your measured/estimated figure.": "ต้องเก็บตัวอย่างเถ้า (ปริมาณคาร์บอน, GCV ของเถ้า) เพื่อคำนวณอย่างละเอียด — ใส่ค่าที่วัด/ประมาณ",
+  "Per UG-34; 0.33 is a common conservative default — verify against the actual edge/attachment detail.": "ตาม UG-34; 0.33 เป็นค่าปลอดภัยทั่วไป — ตรวจสอบกับรายละเอียดขอบ/การยึดจริง",
+  "Refractory joints are usually thinner than regular masonry — 2–5mm typical.": "รอยต่อวัสดุทนไฟมักบางกว่างานก่ออิฐทั่วไป — ทั่วไป 2–5 mm",
+  "Resin expands 50–100% during backwash.": "เรซินขยายตัว 50–100% ขณะ backwash",
+  "Rolling resistance coefficient for belt+material over idlers. 0.02–0.04 typical.": "สัมประสิทธิ์ความต้านทานการกลิ้งของสายพาน+วัสดุบนลูกกลิ้ง ทั่วไป 0.02–0.04",
+  "Rule-of-thumb design minimum, not a substitute for a Jenike flow-property test.": "ค่าต่ำสุดตามหลักปฏิบัติ ไม่ใช่ตัวแทนของการทดสอบ Jenike",
+  "Sets minimum backwash (surge) tank volume.": "กำหนดปริมาตรถังน้ำ backwash ขั้นต่ำ",
+  "Sidewall belts usually run 0.5–2.0 m/s to limit spillage.": "สายพาน sidewall มักใช้ 0.5–2.0 m/s เพื่อลดการหก",
+  "Sidewall/cleated belting is heavy — corrugated sidewalls, cleats, thick covers. Often 10–30 kg/m depending on width/height/rating; get this from the belt manufacturer's data sheet if possible.": "สายพาน sidewall/cleat มีน้ำหนักมาก — sidewall ลอน, cleat, ผิวหนา มัก 10–30 kg/m ตามความกว้าง/สูง/พิกัด ควรใช้ค่าจาก data sheet ผู้ผลิต",
+  "Sized 3–15 TPH range.": "เหมาะกับช่วง 3–15 TPH",
+  "Space above the bed for backwash expansion — 50% of bed depth is typical.": "พื้นที่เหนือชั้นสารกรองสำหรับการขยายตัวขณะ backwash — ทั่วไป 50% ของความหนาชั้น",
+  "Spacing between cleats along the belt — one filled pocket is discharged per pitch length that passes.": "ระยะห่างระหว่าง cleat ตามแนวสายพาน — จ่ายวัสดุหนึ่งช่องต่อหนึ่งพิทช์ที่ผ่านไป",
+  "Standard mill length is often 6.0m.": "ความยาวมาตรฐานจากโรงรีดมักเป็น 6.0 m",
+  "Standard pitch is usually = screw diameter (full pitch).": "พิทช์มาตรฐานมักเท่ากับเส้นผ่านศูนย์กลาง screw (full pitch)",
+  "Sum of boiler passes + ductwork + dust collector pressure drop (from equipment data).": "ผลรวมความดันตกของหม้อไอน้ำ + ท่อลม + เครื่องดักฝุ่น (จากข้อมูลอุปกรณ์)",
+  "This is the single biggest lever on fuel consumption — use your actual batch moisture, not a generic default.": "ตัวแปรที่มีผลต่อการใช้เชื้อเพลิงมากที่สุด — ใช้ค่าความชื้นจริงของล็อต ไม่ใช่ค่าเริ่มต้นทั่วไป",
+  "Time between regenerations.": "เวลาระหว่างการ regeneration",
+  "Time in warehouse before sale/installation.": "ระยะเวลาในคลังก่อนขาย/ติดตั้ง",
+  "Trim/spillage loss — 8–15% typical, more for complex shapes.": "สูญเสียจากการตัดแต่ง/หก — ทั่วไป 8–15% มากกว่านี้สำหรับรูปทรงซับซ้อน",
+  "Typical 10–15 m/hr for pressure sand filters.": "ทั่วไป 10–15 m/hr สำหรับถังกรองทรายแบบแรงดัน",
+  "Typical 10–20 m/hr.": "ทั่วไป 10–20 m/hr",
+  "Typical 150–200mm for hydraulic walking floors.": "ทั่วไป 150–200 mm สำหรับ walking floor ไฮดรอลิก",
+  "Typical 4–8s; faster cycling = higher throughput but more wear/hydraulic demand.": "ทั่วไป 4–8 s รอบเร็วขึ้น = กำลังการผลิตสูงขึ้น แต่สึกหรอ/ใช้ไฮดรอลิกมากขึ้น",
+  "Typical 600–900mm. This depth (with the vessel area) determines vessel diameter.": "ทั่วไป 600–900 mm ความหนานี้ (ร่วมกับพื้นที่ถัง) กำหนดเส้นผ่านศูนย์กลางถัง",
+  "Typical 750–1500mm. In EBCT mode, this depth (with area) also sets vessel diameter.": "ทั่วไป 750–1500 mm ในโหมด EBCT ความหนานี้ (ร่วมกับพื้นที่) กำหนดเส้นผ่านศูนย์กลางถังด้วย",
+  "Typical 750–1500mm. This depth sets vessel diameter here.": "ทั่วไป 750–1500 mm ความหนานี้กำหนดเส้นผ่านศูนย์กลางถัง",
+  "Typical 75–83% for biomass grate-fired.": "ทั่วไป 75–83% สำหรับหม้อไอน้ำชีวมวลแบบตะกรับ",
+  "Typical 8–15 min depending on influent turbidity/bed fouling.": "ทั่วไป 8–15 นาที ขึ้นกับความขุ่นของน้ำเข้า/การอุดตันของชั้นกรอง",
+  "Typical cyclone inlet design velocity ~15–20 m/s.": "ความเร็วออกแบบทางเข้า cyclone ทั่วไป ~15–20 m/s",
+  "Typical hopper wall vibrators are sized at 2–4× the static weight of material bearing on the vibrated panel.": "มอเตอร์สั่นผนัง hopper ทั่วไปกำหนดขนาดที่ 2–4 เท่าของน้ำหนักสถิตของวัสดุที่กดบนแผ่นที่สั่น",
+  "Typical range 6–20% depending on grade — always use the figure from the product's technical data sheet, not this default.": "ช่วงทั่วไป 6–20% ตามเกรด — ใช้ค่าจาก technical data sheet ของผลิตภัณฑ์เสมอ",
+  "Typical: 85–90% oil/gas, 75–83% biomass grate-fired.": "ทั่วไป: 85–90% น้ำมัน/ก๊าซ, 75–83% ชีวมวลแบบตะกรับ",
+  "Typically 1–2% for a well-lagged boiler; larger/older units run higher.": "ทั่วไป 1–2% สำหรับหม้อไอน้ำที่หุ้มฉนวนดี เครื่องใหญ่/เก่าจะสูงกว่า",
+  "Typically 3–6 units across the grate width, each on its own VFD.": "ทั่วไป 3–6 ชุดตามความกว้างตะกรับ แต่ละชุดมี VFD ของตัวเอง",
+  "Usable volume vs full geometric volume — accounts for headspace, bridging clearance, uneven fill.": "ปริมาตรใช้งานได้เทียบกับปริมาตรเรขาคณิตเต็ม — คิดพื้นที่ว่างด้านบน ระยะเผื่อ bridging และการบรรจุไม่สม่ำเสมอ",
+  "Use equivalent diameter for rectangular ducts.": "ใช้เส้นผ่านศูนย์กลางเทียบเท่าสำหรับท่อลมสี่เหลี่ยม",
+  "Use this when the vessel size is already fixed (existing tank, available stock size, client-specified) — the tool back-calculates the resulting rate/EBCT/service run instead of sizing the diameter for you.": "ใช้เมื่อขนาดถังถูกกำหนดแล้ว (ถังเดิม ขนาดที่มีในสต็อก ลูกค้ากำหนด) — เครื่องมือจะคำนวณย้อนกลับหา rate/EBCT/service run แทนการหาเส้นผ่านศูนย์กลาง",
+  "Used to correct the dry-gas (Nm³/Sm³) figures for moisture.": "ใช้ปรับแก้ค่าก๊าซแห้ง (Nm³/Sm³) ตามความชื้น",
+  "Used to estimate moisture carried in with combustion air (L4).": "ใช้ประมาณความชื้นที่มากับอากาศเผาไหม้ (L4)",
+  "Used to scale flue gas mass flow for the fan sizing section.": "ใช้ปรับสเกลอัตราไหลมวลไอเสียสำหรับส่วนคำนวณพัดลม",
+  "Varies a lot by fuel — PKS/pellets are dense, rice husk is very light.": "ต่างกันมากตามชนิดเชื้อเพลิง — PKS/pellet หนาแน่น แกลบเบามาก",
+  "Width of the discharge trough at the very bottom — matches the screw's outer diameter plus clearance, running the full bin length.": "ความกว้างรางจ่ายที่ก้นสุด — เท่ากับ OD ของ screw บวกระยะเผื่อ ยาวตลอด bin",
+  "Your borrowing cost or opportunity cost of capital.": "ต้นทุนการกู้ยืมหรือต้นทุนค่าเสียโอกาสของเงินทุน",
+  "~0.02 typical for galvanized/steel ductwork (Darcy-Weisbach).": "~0.02 ทั่วไปสำหรับท่อลมเหล็กชุบสังกะสี/เหล็ก (Darcy-Weisbach)",
+  "~0.80–0.88 typical for induction motors near full load.": "~0.80–0.88 ทั่วไปสำหรับมอเตอร์เหนี่ยวนำใกล้เต็มโหลด",
+  "~0.88–0.95 depending on size/IE class.": "~0.88–0.95 ขึ้นกับขนาด/ชั้น IE",
+  "~1.0–1.3 low salt dose, ~1.6–2.0 high salt dose.": "~1.0–1.3 salt dose ต่ำ, ~1.6–2.0 salt dose สูง",
+  "~1.2 sawdust, 2–3 wood chip, 3–4 abrasive/EFB.": "~1.2 ขี้เลื่อย, 2–3 ไม้สับ, 3–4 วัสดุกัดกร่อน/EFB",
+  "~1900–2300 for fireclay; confirm from product data.": "~1900–2300 สำหรับ fireclay ยืนยันจากข้อมูลผลิตภัณฑ์",
+  "~5–7% typical for woody biomass.": "~5–7% ทั่วไปสำหรับชีวมวลจากไม้",
+  "Solve vessel size": "คำนวณขนาดถัง",
+  "Fixed diameter": "กำหนดเส้นผ่านศูนย์กลาง",
+  "Check my size": "ตรวจสอบขนาดที่กำหนด",
+  "Solve required thickness": "คำนวณความหนาที่ต้องการ",
+  "Indirect (heat loss)": "Indirect (heat loss)",
+  "Direct (input/output)": "Direct (input/output)",
+  "Given excess air %": "กำหนด excess air %",
+  "Given measured O2%": "กำหนด O2% ที่วัดได้",
+  "By pressure": "ตามความดัน",
+  "By temperature": "ตามอุณหภูมิ",
+  "By water temp": "ตามอุณหภูมิน้ำ",
+  "By effective size": "ตามขนาดเม็ด",
+  "Custom": "กำหนดเอง",
+  "Properties": "คุณสมบัติ",
+  "Distribution": "ท่อส่ง",
+  "Glass wool": "ใยแก้ว",
+  "Rock wool": "ใยหิน",
+  "Pocket-based (cleat pitch)": "ตามช่องบรรจุ (cleat pitch)",
+  "Shape factor (approx.)": "Shape factor (ประมาณ)",
+  "Stroke/cycle → Capacity": "ระยะชัก/รอบ → กำลังการผลิต",
+  "🔗 Match belt conveyor feed rate": "🔗 จับคู่อัตราป้อนกับ belt conveyor",
+  "RPM → Capacity": "RPM → กำลังการผลิต",
+  "Target flow → RPM": "อัตราไหลเป้าหมาย → RPM",
+  "Dry bulb + RH": "Dry bulb + RH",
+  "Dry bulb + Wet bulb": "Dry bulb + Wet bulb",
+  "By EBCT": "ตาม EBCT",
+  "By velocity": "ตามความเร็ว",
+  "Flash Steam": "Flash Steam",
 };
 
 function tr(s) {
@@ -459,7 +1264,7 @@ function Field({ label, unit, value, onChange, step = "any", min, hint }) {
   return (
     <label className="block mb-3">
       <div className="flex items-baseline justify-between mb-1">
-        <span className="text-[11px] uppercase tracking-wider text-neutral-400 font-semibold">{label}</span>
+        <span className="text-[11px] uppercase tracking-wider text-neutral-400 font-semibold">{tr(label)}</span>
         {unit && <span className="text-[10px] text-neutral-500 font-mono">{unit}</span>}
       </div>
       <input
@@ -470,7 +1275,7 @@ function Field({ label, unit, value, onChange, step = "any", min, hint }) {
         onChange={(e) => onChange(parseFloat(e.target.value))}
         className="w-full bg-neutral-900 border border-neutral-700 focus:border-amber-500 focus:outline-none rounded px-3 py-2 text-neutral-100 font-mono text-sm"
       />
-      {hint && <div className="text-[10px] text-neutral-500 mt-1">{hint}</div>}
+      {hint && <div className="text-[10px] text-neutral-500 mt-1">{tr(hint)}</div>}
     </label>
   );
 }
@@ -503,11 +1308,11 @@ function Plate({ title, children }) {
   );
 }
 
-function Readout({ label, value, unit, big }) {
+function Readout({ label, value, unit, big, warn }) {
   return (
     <div className="flex items-baseline justify-between py-1.5 border-b border-neutral-800 last:border-0">
       <span className="text-xs text-neutral-400">{tr(label)}</span>
-      <span className={`font-mono text-neutral-100 ${big ? "text-lg font-bold text-amber-400" : "text-sm"}`}>
+      <span className={`font-mono ${warn ? "text-red-400" : "text-neutral-100"} ${big ? `text-lg font-bold ${warn ? "" : "text-amber-400"}` : "text-sm"}`}>
         {value} <span className="text-neutral-500 text-xs">{unit}</span>
       </span>
     </div>
@@ -533,7 +1338,7 @@ function CategoryDivider({ children }) {
 
 function StickyResults({ items }) {
   return (
-    <div className="sticky top-0 z-20 bg-neutral-950/95 backdrop-blur border border-neutral-700 rounded-md px-3 py-2 mb-4 flex flex-wrap gap-x-5 gap-y-1">
+    <div className="sticky top-[68px] z-20 bg-neutral-950/95 backdrop-blur border border-neutral-700 rounded-md px-3 py-2 mb-4 flex flex-wrap gap-x-5 gap-y-1">
       {items.map((it, i) => (
         <div key={i} className="flex items-baseline gap-1.5">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">{tr(it.label)}</span>
@@ -617,6 +1422,90 @@ function SaveLoadBar({ onSave, onLoad, filename }) {
   );
 }
 
+// ================= SHARED PRINT / REPORT COMPONENTS =================
+// One consistent, customer-ready document frame for every printable sheet in the toolbox:
+// company block on the left, document control (doc no / rev / date) on the right, and a
+// standard three-signature block at the bottom. Keep report wording factual and short — the
+// on-screen tools carry the explanatory hints; the printed sheet should read as a finished document.
+const COMPANY = {
+  name: "Thanaphon Engineering Co., Ltd.",
+  short: "TPE",
+  tagline: "Industrial Boiler & Steam Systems",
+};
+
+function todayStr() {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+function PrintHeader({ title, subtitle, docNo, rev, sheet, extraRight, date }) {
+  return (
+    <div className="print-section flex justify-between items-start border-b-2 border-black pb-2 mb-3">
+      <div className="flex items-start gap-3">
+        <div className="w-11 h-11 border-2 border-black flex items-center justify-center font-bold text-sm tracking-wider">
+          {COMPANY.short}
+        </div>
+        <div>
+          <div className="text-[11px] font-bold uppercase tracking-wide">{COMPANY.name}</div>
+          <div className="text-[9px] text-neutral-700">{COMPANY.tagline}</div>
+          <div className="text-base font-bold mt-1 leading-tight">{title}</div>
+          {subtitle && <div className="text-[10px] text-neutral-800">{subtitle}</div>}
+        </div>
+      </div>
+      <table className="text-[10px]" style={{ borderCollapse: "collapse" }}>
+        <tbody>
+          <tr><td className="border border-black px-2 py-0.5 font-bold">{tr("Doc No")}</td><td className="border border-black px-2 py-0.5 min-w-[110px]">{docNo || "—"}</td></tr>
+          <tr><td className="border border-black px-2 py-0.5 font-bold">{tr("Rev")}</td><td className="border border-black px-2 py-0.5">{rev ?? "0"}</td></tr>
+          <tr><td className="border border-black px-2 py-0.5 font-bold">{tr("Date")}</td><td className="border border-black px-2 py-0.5">{date || todayStr()}</td></tr>
+          {sheet && <tr><td className="border border-black px-2 py-0.5 font-bold">Sheet</td><td className="border border-black px-2 py-0.5">{sheet}</td></tr>}
+          {extraRight}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PrintSignatures({ roles }) {
+  const r = roles || [
+    { label: "Prepared by", role: "Design Engineer" },
+    { label: "Checked by", role: "Senior Engineer" },
+    { label: "Approved by", role: "Engineering Manager" },
+  ];
+  return (
+    <div className="print-section mt-6">
+      <table className="w-full text-[10px]" style={{ borderCollapse: "collapse" }}>
+        <tbody>
+          <tr>
+            {r.map((s, i) => (
+              <td key={i} className="border border-black px-2 pt-1 pb-8 align-top w-1/3">
+                <div className="font-bold">{tr(s.label)}</div>
+                <div className="text-[9px] text-neutral-700">{s.role}</div>
+              </td>
+            ))}
+          </tr>
+          <tr>
+            {r.map((s, i) => (
+              <td key={i} className="border border-black px-2 py-0.5 text-[9px]">
+                Name / Signature / {tr("Date")}
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PrintNotes({ children }) {
+  return (
+    <div className="print-section mt-3 text-[9px] leading-snug">
+      <span className="font-bold">{tr("Notes")}: </span>{children}
+    </div>
+  );
+}
+
 // ================= BELT CONVEYOR MODULE =================
 function BeltConveyorPanel({ capacityTPH, setCapacityTPH }) {
   const [densityPreset, setDensityPreset] = useState("Wood chip (biomass)");
@@ -624,6 +1513,11 @@ function BeltConveyorPanel({ capacityTPH, setCapacityTPH }) {
   const [beltWidth, setBeltWidth] = useState(500);
   const [sidewallHeight, setSidewallHeight] = useState(150);
   const [shapeFactor, setShapeFactor] = useState(0.55);
+  const [capacityMethod, setCapacityMethod] = useState("pocket"); // 'shapeFactor' | 'pocket'
+  const [cleatPitch, setCleatPitch] = useState(252);
+  const [pocketFillW, setPocketFillW] = useState(250);
+  const [pocketFillL, setPocketFillL] = useState(250);
+  const [pocketFillH, setPocketFillH] = useState(112);
   const [beltSpeed, setBeltSpeed] = useState(1.0);
   const [length, setLength] = useState(12);
   const [angle, setAngle] = useState(60);
@@ -640,9 +1534,19 @@ function BeltConveyorPanel({ capacityTPH, setCapacityTPH }) {
   const density = densityPreset === "Custom…" ? customDensity : BULK_DENSITY_PRESETS.find(p => p.label === densityPreset)?.value ?? customDensity;
 
   const r = useMemo(() => {
-    const A = (beltWidth / 1000) * (sidewallHeight / 1000) * shapeFactor; // m2
-    const geomCapacity_m3hr = A * beltSpeed * 3600;
-    const geomCapacity_TPH = geomCapacity_m3hr * density / 1000;
+    let A, geomCapacity_m3hr, geomCapacity_TPH, pocketsPerSec, pocketVolume_L;
+    if (capacityMethod === "pocket") {
+      const pocketVolume_m3 = (pocketFillW / 1000) * (pocketFillL / 1000) * (pocketFillH / 1000);
+      pocketVolume_L = pocketVolume_m3 * 1000;
+      pocketsPerSec = beltSpeed / (cleatPitch / 1000);
+      geomCapacity_m3hr = pocketVolume_m3 * pocketsPerSec * 3600;
+      geomCapacity_TPH = geomCapacity_m3hr * density / 1000;
+      A = (beltWidth / 1000) * (sidewallHeight / 1000) * shapeFactor; // kept for reference only in this mode
+    } else {
+      A = (beltWidth / 1000) * (sidewallHeight / 1000) * shapeFactor; // m2
+      geomCapacity_m3hr = A * beltSpeed * 3600;
+      geomCapacity_TPH = geomCapacity_m3hr * density / 1000;
+    }
 
     const H = length * Math.sin((angle * Math.PI) / 180);
     const qm = (capacityTPH * 1000) / 3600; // kg/s
@@ -689,12 +1593,12 @@ function BeltConveyorPanel({ capacityTPH, setCapacityTPH }) {
     }
 
     return {
-      A, geomCapacity_m3hr, geomCapacity_TPH, H,
+      A, geomCapacity_m3hr, geomCapacity_TPH, H, pocketsPerSec, pocketVolume_L,
       P_lift_kW, P_fric_kW, P_skirt_kW, P_shaft_kW, P_motor_kW, P_motor_HP, motorSelected,
       pulleyRpm, overallRatio, gearboxSelected, trimRatio, drivenTeeth, actualTrim,
       actualOverall, actualPulleyRpm, actualBeltSpeed, speedError, needsSprocket,
     };
-  }, [capacityTPH, density, beltWidth, sidewallHeight, shapeFactor, beltSpeed, length, angle, frictionFactor, beltWeightPerM, skirtResistance, driveEff, serviceFactor, pulleyDia, motorRpm, driveType, driverTeeth]);
+  }, [capacityTPH, density, beltWidth, sidewallHeight, shapeFactor, capacityMethod, cleatPitch, pocketFillW, pocketFillL, pocketFillH, beltSpeed, length, angle, frictionFactor, beltWeightPerM, skirtResistance, driveEff, serviceFactor, pulleyDia, motorRpm, driveType, driverTeeth]);
 
   const capacityWarning = r.geomCapacity_TPH < capacityTPH * 0.98;
 
@@ -716,11 +1620,31 @@ function BeltConveyorPanel({ capacityTPH, setCapacityTPH }) {
         )}
 
         <SubHeader>Belt & pocket geometry</SubHeader>
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setCapacityMethod("pocket")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${capacityMethod === "pocket" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Pocket-based (cleat pitch)")}</button>
+          <button onClick={() => setCapacityMethod("shapeFactor")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${capacityMethod === "shapeFactor" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Shape factor (approx.)")}</button>
+        </div>
         <div className="grid grid-cols-2 gap-x-3">
           <Field label="Belt width" unit="mm" value={beltWidth} onChange={setBeltWidth} />
           <Field label="Sidewall height" unit="mm" value={sidewallHeight} onChange={setSidewallHeight} />
         </div>
-        <Field label="Fill / shape factor" unit="0–1" step="0.01" value={shapeFactor} onChange={setShapeFactor} hint="Fraction of belt-width × sidewall-height box actually filled. 0.45–0.65 typical for cleated sidewall belts." />
+        {capacityMethod === "pocket" ? (
+          <>
+            <Field label="Cleat pitch" unit="mm" step="1" value={cleatPitch} onChange={setCleatPitch} hint="Spacing between cleats along the belt — one filled pocket is discharged per pitch length that passes." />
+            <div className="text-[10px] text-neutral-500 -mt-2 mb-3">
+              Enter the actual filled-material box per pocket (not the empty pocket capacity) — real fill is
+              always less than the full sidewall/cleat envelope due to angle of repose and loading pattern.
+              Measure or estimate this from photos/trials, or start from the values below.
+            </div>
+            <div className="grid grid-cols-3 gap-x-2">
+              <Field label="Fill width" unit="mm" step="5" value={pocketFillW} onChange={setPocketFillW} />
+              <Field label="Fill length" unit="mm" step="5" value={pocketFillL} onChange={setPocketFillL} hint="Along belt travel, ≤ cleat pitch." />
+              <Field label="Fill height" unit="mm" step="5" value={pocketFillH} onChange={setPocketFillH} />
+            </div>
+          </>
+        ) : (
+          <Field label="Fill / shape factor" unit="0–1" step="0.01" value={shapeFactor} onChange={setShapeFactor} hint="Fraction of belt-width × sidewall-height box actually filled. 0.45–0.65 typical for cleated sidewall belts." />
+        )}
         <Field label="Belt speed" unit="m/s" step="0.05" value={beltSpeed} onChange={setBeltSpeed} hint="Sidewall belts usually run 0.5–2.0 m/s to limit spillage." />
 
         <SubHeader>Layout & resistance</SubHeader>
@@ -751,9 +1675,21 @@ function BeltConveyorPanel({ capacityTPH, setCapacityTPH }) {
       </Plate>
 
       <Plate title="Capacity check">
+        {capacityMethod === "pocket" && (
+          <>
+            <Readout label="Pocket fill volume" value={fmt(r.pocketVolume_L,2)} unit="L" />
+            <Readout label="Pockets discharged" value={fmt(r.pocketsPerSec,3)} unit="pockets/s" />
+          </>
+        )}
         <Readout label="Geometry-derived capacity" value={fmt(r.geomCapacity_m3hr,1)} unit="m³/hr" />
-        <Readout label="Geometry-derived capacity" value={fmt(r.geomCapacity_TPH,2)} unit="TPH" />
+        <Readout label="Geometry-derived capacity" value={fmt(r.geomCapacity_TPH,2)} unit="TPH" big />
         <Readout label="Lift height" value={fmt(r.H,2)} unit="m" />
+        <button
+          onClick={() => setCapacityTPH(Number(r.geomCapacity_TPH.toFixed(2)))}
+          className="mt-2 w-full py-2 rounded text-xs font-bold uppercase tracking-wide border border-amber-600 text-amber-400 hover:bg-amber-500 hover:text-neutral-950"
+        >
+          {tr("Use this as target capacity ↓")}
+        </button>
         {capacityWarning && (
           <div className="mt-2 text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1.5">
             Geometry gives less capacity than target — increase belt width, sidewall height, fill factor, or speed.
@@ -903,19 +1839,19 @@ function ScrewConveyorPanel({ beltCapacityTPH }) {
             onClick={() => setMode("rpmToCapacity")}
             className={`w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border ${mode === "rpmToCapacity" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}
           >
-            RPM → Capacity
+            {tr("RPM → Capacity")}
           </button>
           <button
             onClick={() => setMode("targetToRpm")}
             className={`w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border ${mode === "targetToRpm" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}
           >
-            Target flow → RPM
+            {tr("Target flow → RPM")}
           </button>
           <button
             onClick={() => setMode("matchBelt")}
             className={`w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border ${mode === "matchBelt" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}
           >
-            🔗 Match belt conveyor feed rate
+            {tr("🔗 Match belt conveyor feed rate")}
           </button>
         </div>
         {mode === "rpmToCapacity" && (
@@ -1032,6 +1968,146 @@ function ScrewConveyorPanel({ beltCapacityTPH }) {
         Simplified sizing estimate (CEMA/DIN-style lumped formulas) for preliminary selection.
         Confirm final motor, gearbox and screw speed against manufacturer torque/speed curves
         and CEMA 350 tables before finalizing.
+      </div>
+    </div>
+  );
+}
+
+// ================= MOVING FLOOR / LIVE BOTTOM FEEDER =================
+function MovingFloorPanel({ beltCapacityTPH }) {
+  const [mode, setMode] = useState("cycleToCapacity"); // 'cycleToCapacity' | 'matchBelt'
+  const [floorWidth, setFloorWidth] = useState(3.0);
+  const [floorLength, setFloorLength] = useState(8.0);
+  const [bedHeight, setBedHeight] = useState(1.2);
+  const [densityPreset, setDensityPreset] = useState("Wood chip (biomass)");
+  const [customDensity, setCustomDensity] = useState(300);
+  const [strokeLength, setStrokeLength] = useState(150);
+  const [cycleTimeS, setCycleTimeS] = useState(5);
+  const [frictionCoef, setFrictionCoef] = useState(0.4);
+  const [numCylinders, setNumCylinders] = useState(2);
+
+  const density = densityPreset === "Custom…" ? customDensity : BULK_DENSITY_PRESETS.find(p => p.label === densityPreset)?.value ?? customDensity;
+
+  const r = useMemo(() => {
+    const targetTPH = mode === "matchBelt" ? beltCapacityTPH : null;
+
+    // advance rate: each full forward/return cycle nets one stroke-length of material movement
+    // (standard walking-floor assumption — sequenced slat groups keep material moving forward net)
+    let cycleTime, advanceRate_mhr, capacity_m3hr, capacity_TPH;
+    if (mode === "matchBelt") {
+      capacity_TPH = targetTPH;
+      capacity_m3hr = (targetTPH * 1000) / density;
+      advanceRate_mhr = floorWidth * bedHeight > 0 ? capacity_m3hr / (floorWidth * bedHeight) : 0;
+      cycleTime = advanceRate_mhr > 0 ? (strokeLength / 1000) / (advanceRate_mhr / 3600) : 0;
+    } else {
+      cycleTime = cycleTimeS;
+      advanceRate_mhr = (strokeLength / 1000) * (3600 / cycleTimeS);
+      capacity_m3hr = floorWidth * bedHeight * advanceRate_mhr;
+      capacity_TPH = (capacity_m3hr * density) / 1000;
+    }
+    const cyclesPerMin = cycleTime > 0 ? 60 / cycleTime : 0;
+
+    // hydraulic push force estimate — friction drag of the full material bed resting on the floor
+    // (a coarse first pass; final cylinder selection should come from the floor manufacturer)
+    const bedMass_kg = floorWidth * floorLength * bedHeight * density;
+    const totalFrictionForce_kN = (frictionCoef * bedMass_kg * 9.81) / 1000;
+    const perCylinderForce_kN = numCylinders > 0 ? totalFrictionForce_kN / numCylinders : 0;
+    const perCylinderForce_ton = perCylinderForce_kN / 9.81;
+
+    return { cycleTime, advanceRate_mhr, capacity_m3hr, capacity_TPH, cyclesPerMin,
+             bedMass_kg, totalFrictionForce_kN, perCylinderForce_kN, perCylinderForce_ton };
+  }, [mode, beltCapacityTPH, floorWidth, floorLength, bedHeight, density, strokeLength, cycleTimeS, frictionCoef, numCylinders]);
+
+  const mismatch = mode === "cycleToCapacity" && beltCapacityTPH > 0
+    ? Math.abs(r.capacity_TPH - beltCapacityTPH) / beltCapacityTPH > 0.05
+    : false;
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "Mass flow", value: fmt(r.capacity_TPH,2), unit: "TPH", warn: mismatch },
+        { label: "Cycle rate", value: fmt(r.cyclesPerMin,2), unit: "cyc/min" },
+        { label: "Push force (total)", value: fmt(r.totalFrictionForce_kN,1), unit: "kN" },
+      ]} />
+
+      <Plate title="Inputs">
+        <SubHeader>Solve for</SubHeader>
+        <div className="flex flex-col gap-2 mb-3">
+          <button
+            onClick={() => setMode("cycleToCapacity")}
+            className={`w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border ${mode === "cycleToCapacity" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}
+          >
+            {tr("Stroke/cycle → Capacity")}
+          </button>
+          <button
+            onClick={() => setMode("matchBelt")}
+            className={`w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border ${mode === "matchBelt" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}
+          >
+            {tr("🔗 Match belt conveyor feed rate")}
+          </button>
+        </div>
+        {mode === "matchBelt" && (
+          <div className="text-[11px] text-sky-400 bg-sky-950/30 border border-sky-900 rounded px-2 py-2 mb-3">
+            Synced to Belt Conveyor tab's target capacity: <span className="font-mono font-bold">{fmt(beltCapacityTPH, 2)} TPH</span>.
+            Change it on the Belt tab and this floor's required cycle time updates automatically.
+          </div>
+        )}
+        {mismatch && (
+          <div className="text-[11px] text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-2 mb-3">
+            This feeder's capacity is {'>'}5% off the Belt Conveyor tab's target ({fmt(beltCapacityTPH,2)} TPH) —
+            the downstream belt will run starved or overloaded relative to what the floor delivers. Adjust
+            stroke length, cycle time, or bed height, or switch to "Match belt conveyor feed rate" above.
+          </div>
+        )}
+
+        <SubHeader>Floor & material</SubHeader>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Floor width" unit="m" step="0.1" value={floorWidth} onChange={setFloorWidth} />
+          <Field label="Floor length" unit="m" step="0.1" value={floorLength} onChange={setFloorLength} hint="Bin/trailer length — sets total storage, used for the push-force estimate." />
+        </div>
+        <Field label="Material bed height on floor" unit="m" step="0.1" value={bedHeight} onChange={setBedHeight} hint="Depth of material actively being conveyed off the floor — usually well below full bin height once the pile has sloughed to its angle of repose." />
+        <Select label="Material (bulk density)" value={densityPreset} onChange={setDensityPreset} options={BULK_DENSITY_PRESETS} />
+        {densityPreset === "Custom…" && (
+          <Field label="Bulk density" unit="kg/m³" value={customDensity} onChange={setCustomDensity} />
+        )}
+
+        <SubHeader>Stroke & cycle</SubHeader>
+        <Field label="Slat stroke length" unit="mm" step="5" value={strokeLength} onChange={setStrokeLength} hint="Typical 150–200mm for hydraulic walking floors." />
+        {mode === "cycleToCapacity" && (
+          <Field label="Full cycle time (fwd + return)" unit="s" step="0.5" value={cycleTimeS} onChange={setCycleTimeS} hint="Typical 4–8s; faster cycling = higher throughput but more wear/hydraulic demand." />
+        )}
+
+        <SubHeader>Hydraulic push force (estimate)</SubHeader>
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Floor/material friction coefficient" unit="—" step="0.05" value={frictionCoef} onChange={setFrictionCoef} hint="0.3–0.5 typical for biomass on a steel/UHMW-lined floor." />
+          <Field label="Number of hydraulic cylinders" unit="—" step="1" value={numCylinders} onChange={setNumCylinders} />
+        </div>
+      </Plate>
+
+      <Plate title="Capacity result">
+        <Readout label="Advance rate" value={fmt(r.advanceRate_mhr,2)} unit="m/hr" />
+        <Readout label="Cycle time" value={fmt(r.cycleTime,2)} unit="s" />
+        <Readout label="Cycle rate" value={fmt(r.cyclesPerMin,2)} unit="cycles/min" />
+        <Readout label="Volumetric capacity" value={fmt(r.capacity_m3hr,1)} unit="m³/hr" />
+        <Readout label="Mass flow" value={fmt(r.capacity_TPH,2)} unit="TPH" big warn={mismatch} />
+      </Plate>
+
+      <Plate title="Hydraulic push force (estimate)">
+        <Readout label="Full material bed weight on floor" value={fmt(r.bedMass_kg/1000,2)} unit="ton" />
+        <Readout label="Total friction/push force required" value={fmt(r.totalFrictionForce_kN,1)} unit="kN" big />
+        <Readout label="Force per cylinder" value={fmt(r.perCylinderForce_kN,1)} unit="kN" />
+        <Readout label="Force per cylinder" value={fmt(r.perCylinderForce_ton,2)} unit="ton" />
+        <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+          Coarse first-pass estimate (friction × full bed weight) to size cylinder bore/pressure in the
+          right ballpark — actual walking-floor cylinder and hydraulic pump selection should come from the
+          floor manufacturer, who accounts for the slat-group sequencing, seal drag, and duty cycle.
+        </div>
+      </Plate>
+
+      <div className="text-[10px] text-neutral-500 leading-relaxed px-1">
+        Assumes each full forward/return cycle advances the material bed by one stroke length — the
+        standard simplification for sequenced-slat hydraulic walking floors. Use "Match belt conveyor feed
+        rate" to keep this feeder's output consistent with whatever capacity the Belt Conveyor tab is sized for.
       </div>
     </div>
   );
@@ -1776,17 +2852,7 @@ function TankVesselPanel() {
 
       {/* ===================== PRINT-ONLY DATASHEET ===================== */}
       <div className="print-sheet text-black bg-white p-6" style={{ fontFamily: "Arial, sans-serif" }}>
-        <div className="flex justify-between items-start border-b-2 border-black pb-2 mb-3">
-          <div>
-            <div className="text-lg font-bold">TANK / VESSEL DATA SHEET</div>
-            <div className="text-xs">Design Code: ASME BPVC Section VIII, Division 1</div>
-          </div>
-          <div className="text-right text-xs">
-            <div>Doc No: {docNo || "—"}</div>
-            <div>Rev: {rev}</div>
-            <div>Date: ____________________</div>
-          </div>
-        </div>
+        <PrintHeader title="TANK / VESSEL DATA SHEET" subtitle="Design Code: ASME BPVC Section VIII, Division 1" docNo={docNo} rev={rev} sheet="DS-1" />
 
         <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
           <tbody>
@@ -1814,7 +2880,7 @@ function TankVesselPanel() {
           <tbody>
             <tr><td className="border border-black px-2 py-1 font-bold">Inside Diameter</td><td className="border border-black px-2 py-1">{fmt(idMm,0)} mm</td>
                 <td className="border border-black px-2 py-1 font-bold">Tan–Tan Length</td><td className="border border-black px-2 py-1">{fmt(tanTanMm,0)} mm</td></tr>
-            <tr><td className="border border-black px-2 py-1 font-bold">Overall Length (approx.)</td><td className="border border-black px-2 py-1">{fmt(calc.OAL_mm,0)} mm</td>
+            <tr><td className="border border-black px-2 py-1 font-bold">Overall Length (T/T + heads)</td><td className="border border-black px-2 py-1">{fmt(calc.OAL_mm,0)} mm</td>
                 <td className="border border-black px-2 py-1 font-bold">Shell Thickness (nom. / req.)</td><td className="border border-black px-2 py-1">{fmt(shellNomMm,1)} / {fmt(calc.t_shell_req,2)} mm</td></tr>
             <tr><td className="border border-black px-2 py-1 font-bold">Head A Type / Thk (nom. / req.)</td><td className="border border-black px-2 py-1">{headAType} — {fmt(headANomMm,1)} / {fmt(calc.t_headA_req,2)} mm</td>
                 <td className="border border-black px-2 py-1 font-bold">Head B Type / Thk (nom. / req.)</td><td className="border border-black px-2 py-1">{headBType} — {fmt(headBNomMm,1)} / {fmt(calc.t_headB_req,2)} mm</td></tr>
@@ -1875,32 +2941,15 @@ function TankVesselPanel() {
           </tbody>
         </table>
 
-        <div className="grid grid-cols-3 gap-4 mt-6 text-xs">
-          <div>Prepared by: ______________________</div>
-          <div>Checked by: ______________________</div>
-          <div>Approved by: ______________________</div>
-        </div>
-        <div className="text-[9px] text-neutral-600 mt-4 leading-relaxed">
-          Preliminary sizing calculation per ASME BPVC Section VIII, Division 1 (simplified thin-wall formulas,
-          UG-27 and UG-32). Allowable stress values are representative — confirm from ASME Section II-D for the
-          exact design temperature. Nozzle schedule is descriptive only; verify area-replacement reinforcement
-          (UG-37) separately. Not a substitute for a certified vessel design/fabrication drawing.
-        </div>
+        <PrintSignatures />
+        <PrintNotes>
+          Designed to ASME BPVC Sec. VIII Div. 1 (UG-27 / UG-32). Allowable stress per ASME Sec. II-D at design
+          temperature. Nozzle reinforcement (UG-37) per fabrication drawing.
+        </PrintNotes>
 
         {/* ===== PAGE 2+: DESIGN CALCULATION REPORT (for appraisal submission) ===== */}
         <div style={{ pageBreakBefore: "always" }}>
-          <div className="print-section flex justify-between items-start border-b-2 border-black pb-2 mb-3">
-            <div>
-              <div className="text-lg font-bold">DESIGN CALCULATION REPORT</div>
-              <div className="text-xs">Pressure Vessel — ASME BPVC Section VIII, Division 1</div>
-              <div className="text-xs">{tag} — {service}</div>
-            </div>
-            <div className="text-right text-xs">
-              <div>Doc No: {docNo || "—"} Rev. {rev}</div>
-              <div>Date: ____________________</div>
-              <div>Sheet: CALC-1</div>
-            </div>
-          </div>
+          <PrintHeader title="DESIGN CALCULATION REPORT" subtitle={`Pressure Vessel — ASME BPVC Sec. VIII Div. 1 · ${tag} — ${service}`} docNo={docNo} rev={rev} sheet="CALC-1" />
 
           <div className="print-section">
             <div className="font-bold text-sm mb-1">1. DESIGN DATA</div>
@@ -1978,25 +3027,16 @@ function TankVesselPanel() {
           <div className="print-section">
             <div className="font-bold text-sm mb-1">7. SCOPE & EXCLUSIONS</div>
             <div className="text-[10px] leading-relaxed border border-black p-2 mb-3">
-              This calculation covers internal-pressure thickness of the cylindrical shell (UG-27) and formed
-              heads (UG-32/UG-34) and the resulting MAWP and hydrostatic test pressure (UG-99(b)) only.
-              The following are excluded and must be qualified separately where applicable: nozzle
-              reinforcement (UG-37 area replacement), external pressure / vacuum (UG-28), support and saddle
-              stresses (Zick analysis for horizontal vessels), lifting-lug design, wind/seismic loads, flange
-              ratings (ASME B16.5), and fatigue. Torispherical head formula shown applies to standard geometry
-              (knuckle r ≈ 6% of crown L); non-standard knuckles require the M-factor per Appendix 1-4(d).
-              Allowable stress S must be confirmed against ASME Section II-D, Table 1A/1B at the stated design
-              temperature before submission.
+              Scope: internal-pressure thickness of cylindrical shell (UG-27) and formed heads (UG-32/UG-34),
+              resulting MAWP, and hydrostatic test pressure. Allowable stress S per ASME Sec. II-D, Table 1A/1B
+              at design temperature. Torispherical head formula per standard geometry (knuckle r ≈ 6% of crown L).
+              Excluded (qualified separately where applicable): nozzle reinforcement (UG-37), external
+              pressure / vacuum (UG-28), support / saddle stresses, lifting lugs, wind / seismic loads, flange
+              ratings (ASME B16.5), and fatigue.
             </div>
           </div>
 
-          <div className="print-section">
-            <div className="grid grid-cols-3 gap-4 mt-4 text-xs">
-              <div>Prepared by: ______________________<br/><span className="text-[9px]">Design Engineer</span></div>
-              <div>Checked by: ______________________<br/><span className="text-[9px]">Senior Engineer</span></div>
-              <div>Approved by: ______________________<br/><span className="text-[9px]">Engineering Manager</span></div>
-            </div>
-          </div>
+          <PrintSignatures />
         </div>
       </div>
     </div>
@@ -2198,8 +3238,8 @@ function BoilerPanel() {
 
         <SubHeader>Excess air / O2</SubHeader>
         <div className="flex gap-2 mb-3">
-          <button onClick={() => setCombMode("givenEA")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${combMode === "givenEA" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Given excess air %</button>
-          <button onClick={() => setCombMode("givenO2")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${combMode === "givenO2" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Given measured O2%</button>
+          <button onClick={() => setCombMode("givenEA")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${combMode === "givenEA" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Given excess air %")}</button>
+          <button onClick={() => setCombMode("givenO2")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${combMode === "givenO2" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Given measured O2%")}</button>
         </div>
         {combMode === "givenEA" ? (
           <Field label="Excess air" unit="%" step="1" value={eaPct} onChange={setEaPct} />
@@ -2241,8 +3281,8 @@ function BoilerPanel() {
 
       <Plate title="Saturated steam table">
         <div className="flex gap-2 mb-3">
-          <button onClick={() => setSteamMode("byPressure")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${steamMode === "byPressure" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>By pressure</button>
-          <button onClick={() => setSteamMode("byTemp")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${steamMode === "byTemp" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>By temperature</button>
+          <button onClick={() => setSteamMode("byPressure")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${steamMode === "byPressure" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("By pressure")}</button>
+          <button onClick={() => setSteamMode("byTemp")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${steamMode === "byTemp" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("By temperature")}</button>
         </div>
         {steamMode === "byPressure" ? (
           <>
@@ -2393,8 +3433,8 @@ function BoilerEfficiencyPanel() {
 
       <Plate title="Method">
         <div className="grid grid-cols-2 gap-2 mb-1">
-          <button onClick={() => setMethod("indirect")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${method === "indirect" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Indirect (heat loss)</button>
-          <button onClick={() => setMethod("direct")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${method === "direct" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Direct (input/output)</button>
+          <button onClick={() => setMethod("indirect")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${method === "indirect" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Indirect (heat loss)")}</button>
+          <button onClick={() => setMethod("direct")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${method === "direct" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Direct (input/output)")}</button>
         </div>
         <Select label="Heating value basis (label only)" value={hvBasis} onChange={setHvBasis} options={[{ label: "GCV" }, { label: "NCV" }]} />
         <Field label={`Heating value (${hvBasis})`} unit="kJ/kg" step="10" value={HV} onChange={setHV} hint="Enter as-fired GCV or NCV per your lab report; the calc uses whichever you enter." />
@@ -2418,8 +3458,8 @@ function BoilerEfficiencyPanel() {
 
           <Plate title="Excess air / O2">
             <div className="flex gap-2 mb-3">
-              <button onClick={() => setCombMode("givenEA")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${combMode === "givenEA" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Given excess air %</button>
-              <button onClick={() => setCombMode("givenO2")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${combMode === "givenO2" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Given measured O2%</button>
+              <button onClick={() => setCombMode("givenEA")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${combMode === "givenEA" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Given excess air %")}</button>
+              <button onClick={() => setCombMode("givenO2")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${combMode === "givenO2" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Given measured O2%")}</button>
             </div>
             {combMode === "givenEA" ? (
               <Field label="Excess air" unit="%" step="1" value={eaPct} onChange={setEaPct} />
@@ -2568,9 +3608,9 @@ function SteamMasterPanel() {
 
       <Plate title="Steam Master">
         <div className="grid grid-cols-3 gap-2 mb-1">
-          <button onClick={() => setTab("properties")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${tab === "properties" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Properties</button>
-          <button onClick={() => setTab("flash")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${tab === "flash" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Flash Steam</button>
-          <button onClick={() => setTab("distribution")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${tab === "distribution" ? "bg-emerald-500 text-neutral-950 border-emerald-500" : "border-neutral-700 text-neutral-300"}`}>Distribution</button>
+          <button onClick={() => setTab("properties")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${tab === "properties" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Properties")}</button>
+          <button onClick={() => setTab("flash")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${tab === "flash" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Flash Steam")}</button>
+          <button onClick={() => setTab("distribution")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${tab === "distribution" ? "bg-emerald-500 text-neutral-950 border-emerald-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Distribution")}</button>
         </div>
       </Plate>
 
@@ -2578,8 +3618,8 @@ function SteamMasterPanel() {
         <>
           <Plate title="Inputs">
             <div className="flex gap-2 mb-3">
-              <button onClick={() => setPropMode("byPressure")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${propMode === "byPressure" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>By pressure</button>
-              <button onClick={() => setPropMode("byTemp")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${propMode === "byTemp" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>By temperature</button>
+              <button onClick={() => setPropMode("byPressure")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${propMode === "byPressure" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("By pressure")}</button>
+              <button onClick={() => setPropMode("byTemp")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${propMode === "byTemp" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("By temperature")}</button>
             </div>
             {propMode === "byPressure" ? (
               <Field label="Pressure" unit="barg" step="0.5" value={propPressureBarg} onChange={setPropPressureBarg} />
@@ -2635,8 +3675,8 @@ function SteamMasterPanel() {
             <Field label="Pipe outside diameter" unit="mm" step="1" value={distPipeOd} onChange={setDistPipeOd} hint="Check the Steel Properties tab for standard pipe OD by NPS/schedule." />
             <Field label="Ambient temperature" unit="°C" step="1" value={distAmbientC} onChange={setDistAmbientC} />
             <div className="flex gap-2 mb-3">
-              <button onClick={() => setDistInsMaterial("glass")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${distInsMaterial === "glass" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Glass wool</button>
-              <button onClick={() => setDistInsMaterial("rock")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${distInsMaterial === "rock" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Rock wool</button>
+              <button onClick={() => setDistInsMaterial("glass")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${distInsMaterial === "glass" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Glass wool")}</button>
+              <button onClick={() => setDistInsMaterial("rock")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${distInsMaterial === "rock" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Rock wool")}</button>
             </div>
             <Field label="Insulation density" unit="kg/m³" step="1" value={distInsDensity} onChange={setDistInsDensity} />
             <Field label="Insulation thickness" unit="mm" step="5" value={distInsThk} onChange={setDistInsThk} />
@@ -3315,8 +4355,8 @@ function PsychrometricPanel() {
 
       <Plate title="Known values">
         <div className="grid grid-cols-2 gap-2 mb-1">
-          <button onClick={() => setInputPair("dbrh")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${inputPair === "dbrh" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Dry bulb + RH</button>
-          <button onClick={() => setInputPair("dbwb")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${inputPair === "dbwb" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Dry bulb + Wet bulb</button>
+          <button onClick={() => setInputPair("dbrh")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${inputPair === "dbrh" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Dry bulb + RH")}</button>
+          <button onClick={() => setInputPair("dbwb")} className={`py-2 rounded text-xs font-semibold uppercase tracking-wide border ${inputPair === "dbwb" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Dry bulb + Wet bulb")}</button>
         </div>
         <Field label="Dry bulb temperature" unit="°C" step="0.5" value={Tdb} onChange={setTdb} />
         {inputPair === "dbrh" ? (
@@ -3343,6 +4383,148 @@ function PsychrometricPanel() {
           one added.
         </div>
       </Plate>
+    </div>
+  );
+}
+
+// ================= MACHINE FOUNDATION HELPERS =================
+// Simplified, static preliminary sizing — the two checks any mechanical engineer should clear before
+// handing off to a civil/structural engineer for final design: (1) foundation mass heavy enough
+// relative to the machine to keep vibration amplitude in check, and (2) bearing pressure under the
+// combined dead weight within the allowable soil capacity. Dynamic (resonance/frequency) analysis
+// needs actual soil dynamic-modulus data and is a separate, more detailed study (e.g. IS 2974) —
+// flagged here, not calculated.
+const MACHINE_FOUNDATION_TYPES = [
+  { label: "Rotating — pump, fan, blower, motor (well balanced)", minRatio: 2.0 },
+  { label: "Rotating — compressor, turbine, high-speed (>1500 rpm)", minRatio: 2.5 },
+  { label: "Reciprocating — compressor, diesel/gas engine", minRatio: 3.5 },
+  { label: "Reciprocating — large/heavy-duty, high out-of-balance force", minRatio: 5.0 },
+];
+
+// ================= MACHINE FOUNDATION PANEL =================
+function MachineFoundationPanel() {
+  const [mode, setMode] = useState("check"); // 'check' = given L/W/T; 'solveThickness' = solve T for target ratio
+  const [machineTypeLabel, setMachineTypeLabel] = useState(MACHINE_FOUNDATION_TYPES[0].label);
+  const [machineWeightKg, setMachineWeightKg] = useState(2000);
+  const [machineLengthM, setMachineLengthM] = useState(1.5);
+  const [machineWidthM, setMachineWidthM] = useState(1.0);
+  const [edgeMarginM, setEdgeMarginM] = useState(0.2);
+  const [concreteDensity, setConcreteDensity] = useState(2400);
+  const [foundationLengthM, setFoundationLengthM] = useState(1.9);
+  const [foundationWidthM, setFoundationWidthM] = useState(1.4);
+  const [foundationThicknessM, setFoundationThicknessM] = useState(0.6);
+  const [allowableBearing, setAllowableBearing] = useState(10); // t/m2
+
+  const minRatio = MACHINE_FOUNDATION_TYPES.find(m => m.label === machineTypeLabel)?.minRatio ?? 2.0;
+
+  const r = useMemo(() => {
+    const suggestedL = machineLengthM + 2 * edgeMarginM;
+    const suggestedW = machineWidthM + 2 * edgeMarginM;
+
+    let L, W, T;
+    if (mode === "solveThickness") {
+      L = suggestedL; W = suggestedW;
+      const requiredFoundationWeight_kg = minRatio * machineWeightKg;
+      T = (L * W) > 0 ? requiredFoundationWeight_kg / (concreteDensity * L * W) : 0;
+    } else {
+      L = foundationLengthM; W = foundationWidthM; T = foundationThicknessM;
+    }
+
+    const footprintArea_m2 = L * W;
+    const foundationVolume_m3 = footprintArea_m2 * T;
+    const foundationWeight_kg = foundationVolume_m3 * concreteDensity;
+    const massRatio = machineWeightKg > 0 ? foundationWeight_kg / machineWeightKg : 0;
+    const totalLoad_kg = machineWeightKg + foundationWeight_kg;
+    const bearingPressure_tm2 = footprintArea_m2 > 0 ? (totalLoad_kg / 1000) / footprintArea_m2 : 0;
+    const marginL_each = (L - machineLengthM) / 2;
+    const marginW_each = (W - machineWidthM) / 2;
+
+    return { suggestedL, suggestedW, L, W, T, footprintArea_m2, foundationVolume_m3, foundationWeight_kg,
+             massRatio, totalLoad_kg, bearingPressure_tm2, marginL_each, marginW_each };
+  }, [mode, machineWeightKg, machineLengthM, machineWidthM, edgeMarginM, concreteDensity,
+      foundationLengthM, foundationWidthM, foundationThicknessM, minRatio]);
+
+  const ratioWarn = r.massRatio < minRatio;
+  const bearingWarn = r.bearingPressure_tm2 > allowableBearing;
+
+  return (
+    <div>
+      <StickyResults items={[
+        { label: "Mass ratio", value: fmt(r.massRatio,2), unit: `× (need ≥${fmt(minRatio,1)})`, warn: ratioWarn },
+        { label: "Bearing pressure", value: fmt(r.bearingPressure_tm2,2), unit: "t/m²", warn: bearingWarn },
+        { label: "Foundation weight", value: fmt(r.foundationWeight_kg/1000,2), unit: "ton" },
+      ]} />
+
+      <Plate title="Machine data">
+        <Select label="Machine type (sets minimum mass ratio)" value={machineTypeLabel} onChange={setMachineTypeLabel} options={MACHINE_FOUNDATION_TYPES.map(m => ({ label: m.label }))} />
+        <Field label="Machine weight (dry, static)" unit="kg" step="10" value={machineWeightKg} onChange={setMachineWeightKg} hint="Include baseplate/skid if it's poured integrally with the foundation." />
+        <div className="grid grid-cols-2 gap-x-3">
+          <Field label="Machine footprint — length" unit="m" step="0.05" value={machineLengthM} onChange={setMachineLengthM} />
+          <Field label="Machine footprint — width" unit="m" step="0.05" value={machineWidthM} onChange={setMachineWidthM} />
+        </div>
+      </Plate>
+
+      <Plate title="Foundation">
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setMode("check")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${mode === "check" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Check my size")}</button>
+          <button onClick={() => setMode("solveThickness")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${mode === "solveThickness" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Solve required thickness")}</button>
+        </div>
+        {mode === "check" ? (
+          <div className="grid grid-cols-3 gap-x-2">
+            <Field label="Length" unit="m" step="0.05" value={foundationLengthM} onChange={setFoundationLengthM} />
+            <Field label="Width" unit="m" step="0.05" value={foundationWidthM} onChange={setFoundationWidthM} />
+            <Field label="Thickness" unit="m" step="0.05" value={foundationThicknessM} onChange={setFoundationThicknessM} />
+          </div>
+        ) : (
+          <>
+            <Field label="Edge margin beyond machine footprint (each side)" unit="m" step="0.05" value={edgeMarginM} onChange={setEdgeMarginM} hint="150–300mm typical so anchor bolts/baseplate sit clear of the foundation edge." />
+            <div className="text-[11px] text-sky-400 bg-sky-950/30 border border-sky-900 rounded px-2 py-2 mb-1">
+              Foundation plan = {fmt(r.suggestedL,2)} × {fmt(r.suggestedW,2)} m (machine footprint + margin both sides).
+              Solving for the thickness that gives a {fmt(minRatio,1)}× mass ratio at that plan size.
+            </div>
+          </>
+        )}
+        <Field label="Concrete density" unit="kg/m³" step="10" value={concreteDensity} onChange={setConcreteDensity} hint="2,400 kg/m³ is the standard assumption for normal-weight concrete." />
+        <Field label="Allowable soil bearing capacity" unit="t/m²" step="0.5" value={allowableBearing} onChange={setAllowableBearing} hint="From geotechnical report if available. 1 ksc (kg/cm²) = 10 t/m² — typical compacted fill/soil ranges roughly 5–20 t/m², but confirm for the actual site." />
+      </Plate>
+
+      <Plate title="Result">
+        <Readout label="Foundation plan size" value={`${fmt(r.L,2)} × ${fmt(r.W,2)}`} unit="m" />
+        {mode === "solveThickness" && (
+          <Readout label="Required thickness" value={fmt(r.T,2)} unit="m" big />
+        )}
+        <Readout label="Edge margin (L / W, each side)" value={`${fmt(r.marginL_each,2)} / ${fmt(r.marginW_each,2)}`} unit="m" warn={r.marginL_each < 0 || r.marginW_each < 0} />
+        <Readout label="Footprint area" value={fmt(r.footprintArea_m2,2)} unit="m²" />
+        <Readout label="Foundation volume (concrete)" value={fmt(r.foundationVolume_m3,2)} unit="m³" />
+        <Readout label="Foundation weight" value={fmt(r.foundationWeight_kg/1000,2)} unit="ton" />
+        <Readout label="Mass ratio (foundation ÷ machine)" value={fmt(r.massRatio,2)} unit={`× (min ${fmt(minRatio,1)}×)`} big warn={ratioWarn} />
+        {ratioWarn && (
+          <div className="text-[10px] text-red-400 -mt-1 mb-2">Below the guideline minimum for this machine type — increase thickness or plan area.</div>
+        )}
+        <Readout label="Total dead load (machine + foundation)" value={fmt(r.totalLoad_kg/1000,2)} unit="ton" />
+        <Readout label="Bearing pressure on soil" value={fmt(r.bearingPressure_tm2,2)} unit="t/m²" big warn={bearingWarn} />
+        {bearingWarn && (
+          <div className="text-[10px] text-red-400 -mt-1 mb-2">Exceeds the allowable soil bearing capacity entered above — increase plan area or check with a geotechnical engineer.</div>
+        )}
+      </Plate>
+
+      <Plate title="Suggested reinforcement (nominal)">
+        <div className="text-xs text-neutral-300 leading-relaxed">
+          For a plain mass-concrete block this size, a nominal shrinkage/temperature mesh such as{" "}
+          <span className="font-mono text-amber-400">DB12 @ 200mm both ways, top and bottom</span> with 75mm
+          clear cover is a common minimum starting point — this is NOT a structural design and does not
+          account for anchor bolt pull-out, local bending under eccentric machine loads, or dynamic forces.
+        </div>
+      </Plate>
+
+      <div className="mt-3 text-[11px] text-amber-400 bg-amber-950/30 border border-amber-900 rounded px-3 py-2 leading-relaxed">
+        Preliminary sizing only — mass-ratio and static bearing-pressure checks, the two things a mechanical
+        engineer typically screens for before involving structural. This does NOT cover: dynamic/vibration
+        (resonance) analysis, which needs actual soil dynamic shear modulus and damping data; eccentric or
+        unbalanced loading if the machine's center of mass isn't centered on the foundation; anchor bolt
+        embedment/pull-out design; or actual rebar design. Have a licensed civil/structural engineer confirm
+        before construction, especially for reciprocating or high-vibration equipment.
+      </div>
     </div>
   );
 }
@@ -3747,8 +4929,8 @@ function InsulationPanel() {
 
         <SubHeader>Insulation material</SubHeader>
         <div className="flex gap-2 mb-3">
-          <button onClick={() => setMaterial("glass")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${material === "glass" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>Glass wool</button>
-          <button onClick={() => setMaterial("rock")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${material === "rock" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>Rock wool</button>
+          <button onClick={() => setMaterial("glass")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${material === "glass" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Glass wool")}</button>
+          <button onClick={() => setMaterial("rock")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${material === "rock" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Rock wool")}</button>
         </div>
         <Field label="Density" unit="kg/m³" step="1" value={density} onChange={setDensity} hint={densityRangeHint} />
         <Select label="Outer jacket / cladding" value={jacketLabel} onChange={setJacketLabel} options={JACKET_OPTIONS.map(j => ({ label: j.label }))} />
@@ -3938,7 +5120,7 @@ function SystemPressureDropPanel() {
           </div>
         ))}
         <button onClick={addRow} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">
-          + Add component
+          {tr("+ Add component")}
         </button>
       </Plate>
 
@@ -4129,6 +5311,37 @@ const WT_MATERIALS = ["FRP (Fiberglass)", "Carbon steel, rubber lined", "Carbon 
 const WT_PIPE_MATERIALS = ["uPVC", "CPVC", "SS304", "Mild steel, galvanized", "Mild steel, black"];
 const WT_HEAD_TYPES = ["Dished (2:1 ellipsoidal)", "Flat"];
 
+// Backwash rate references for sand filters, per ANSI/AWWA B100-16 "Granular Filter Material"
+// (Table 1, Fluidization backwash rates for d60≈0.7mm, SG=2.65 sand, by water temperature) and a
+// common design-guide table by effective size at 30°C. Design practice typically targets 20-25% bed
+// expansion using Rbw ≈ 40-50 m³/m²·h for ~0.7-0.8mm sand at 25-30°C.
+const BACKWASH_RATE_BY_TEMP = [
+  { tempC: 5, rbw: 29.3 }, { tempC: 10, rbw: 33.0 }, { tempC: 15, rbw: 36.7 },
+  { tempC: 20, rbw: 40.3 }, { tempC: 25, rbw: 44.0 }, { tempC: 30, rbw: 48.9 },
+];
+const BACKWASH_RATE_BY_ES = [
+  { es: 0.50, rbw: 24 }, { es: 0.60, rbw: 30 }, { es: 0.70, rbw: 38 },
+  { es: 0.80, rbw: 47 }, { es: 0.90, rbw: 56 }, { es: 1.00, rbw: 65 },
+];
+function interpTable(table, key, x) {
+  const pts = table;
+  if (x <= pts[0][key]) return pts[0].rbw;
+  if (x >= pts[pts.length - 1][key]) return pts[pts.length - 1].rbw;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    if (x >= a[key] && x <= b[key]) {
+      const t = (x - a[key]) / (b[key] - a[key]);
+      return a.rbw + t * (b.rbw - a.rbw);
+    }
+  }
+  return pts[pts.length - 1].rbw;
+}
+// Round a raw calculated pipe diameter (mm) up to the nearest standard NPS from the pipe schedule table.
+function nearestStandardPipeOd(diameter_mm) {
+  const sorted = [...PIPE_TABLE].sort((a, b) => a.od - b.od);
+  return sorted.find(p => p.od >= diameter_mm) ?? sorted[sorted.length - 1];
+}
+
 function suggestPipeSizeMm(flow_m3hr, velocity_ms) {
   const flow_m3s = flow_m3hr / 3600;
   const area_m2 = flow_m3s / velocity_ms;
@@ -4204,9 +5417,21 @@ function WaterTreatmentPanel() {
 
   const [flow, setFlow] = useState(10);
 
+  const [sizeMode, setSizeMode] = useState("solve"); // 'solve' = compute diameter from rate; 'fixed' = diameter given, compute resulting rate
+  const [fixedDiameterMm, setFixedDiameterMm] = useState(900);
+
   const [sandRate, setSandRate] = useState(12);
   const [sandBedDepth, setSandBedDepth] = useState(600);
   const [sandFreeboardMm, setSandFreeboardMm] = useState(300);
+
+  const [rbwMode, setRbwMode] = useState("byTemp"); // 'byTemp' | 'byES' | 'custom'
+  const [bwWaterTempC, setBwWaterTempC] = useState(30);
+  const [bwEffectiveSizeMm, setBwEffectiveSizeMm] = useState(0.7);
+  const [rbwCustom, setRbwCustom] = useState(50);
+  const [bwDurationMin, setBwDurationMin] = useState(10);
+  const [bwPipeVelocity, setBwPipeVelocity] = useState(2.0);
+  const [bwPumpOversize, setBwPumpOversize] = useState(1.2);
+  const [bwTanksSimultaneous, setBwTanksSimultaneous] = useState(1);
 
   const [carbonMode, setCarbonMode] = useState("ebct");
   const [ebctMin, setEbctMin] = useState(10);
@@ -4256,42 +5481,68 @@ function WaterTreatmentPanel() {
 
   const process = useMemo(() => {
     if (filterType === "sand") {
-      const area = flow / sandRate;
-      const diameter = Math.sqrt((4 * area) / Math.PI);
+      let area, diameter;
+      if (sizeMode === "fixed") {
+        diameter = fixedDiameterMm / 1000;
+        area = (Math.PI / 4) * diameter * diameter;
+      } else {
+        area = flow / sandRate;
+        diameter = Math.sqrt((4 * area) / Math.PI);
+      }
+      const velocity = flow / area; // resulting filtration rate either way
       return {
         area, diameter_m: diameter, diameter_mm: diameter * 1000,
         primaryLabel: "Sand media", primaryDepth: sandBedDepth,
         freeboard_mm: sandFreeboardMm,
-        velocity: sandRate,
+        velocity,
       };
     }
     if (filterType === "carbon") {
       let area, diameter, bedVolume;
-      if (carbonMode === "ebct") {
+      if (sizeMode === "fixed") {
+        diameter = fixedDiameterMm / 1000;
+        area = (Math.PI / 4) * diameter * diameter;
+        bedVolume = area * (carbonBedDepth / 1000);
+      } else if (carbonMode === "ebct") {
         bedVolume = flow * (ebctMin / 60);
         area = bedVolume / (carbonBedDepth / 1000);
+        diameter = Math.sqrt((4 * area) / Math.PI);
       } else {
         area = flow / carbonVelocity;
         bedVolume = area * (carbonBedDepth / 1000);
+        diameter = Math.sqrt((4 * area) / Math.PI);
       }
-      diameter = Math.sqrt((4 * area) / Math.PI);
       const actualEbct = (bedVolume / flow) * 60;
       const actualVelocity = flow / area;
       return {
         area, diameter_m: diameter, diameter_mm: diameter * 1000, bedVolume, actualEbct, actualVelocity,
         primaryLabel: "Activated carbon", primaryDepth: carbonBedDepth,
         freeboard_mm: carbonFreeboardMm,
+        velocity: actualVelocity,
       };
     }
-    const totalWater_L = flow * serviceRunHr * 1000;
-    const hardnessLoad_eq = (totalWater_L * hardness) / 50000;
-    const resinVolume_L = hardnessLoad_eq / resinCapacity;
-    const resinVolume_m3 = resinVolume_L / 1000;
-    const area = resinVolume_m3 / (resinBedDepth / 1000);
-    const diameter = Math.sqrt((4 * area) / Math.PI);
+    // softener (resin)
+    let area, diameter, resinVolume_L, serviceRunHr_result;
+    if (sizeMode === "fixed") {
+      diameter = fixedDiameterMm / 1000;
+      area = (Math.PI / 4) * diameter * diameter;
+      const resinVolume_m3 = area * (resinBedDepth / 1000);
+      resinVolume_L = resinVolume_m3 * 1000;
+      const hardnessCapacity_eq = resinVolume_L * resinCapacity;
+      const totalWaterCapacity_L = (hardnessCapacity_eq * 50000) / hardness;
+      serviceRunHr_result = flow > 0 ? totalWaterCapacity_L / (flow * 1000) : 0;
+    } else {
+      const totalWater_L = flow * serviceRunHr * 1000;
+      const hardnessLoad_eq = (totalWater_L * hardness) / 50000;
+      resinVolume_L = hardnessLoad_eq / resinCapacity;
+      const resinVolume_m3 = resinVolume_L / 1000;
+      area = resinVolume_m3 / (resinBedDepth / 1000);
+      diameter = Math.sqrt((4 * area) / Math.PI);
+      serviceRunHr_result = serviceRunHr;
+    }
     const velocity = flow / area;
     const saltPerRegen_kg = (resinVolume_L * saltDose) / 1000;
-    const regensPerWeek = (24 * 7) / serviceRunHr;
+    const regensPerWeek = (24 * 7) / serviceRunHr_result;
     const brineSaltStorage_kg = saltPerRegen_kg * regensToStore;
     const saltBulkVolume_L = (brineSaltStorage_kg / 1100) * 1000; // granular NaCl bulk density ~1,100 kg/m³
     const brineTankVolume_L = saltBulkVolume_L * 1.5; // +50% for water/brine space above the salt bed
@@ -4300,8 +5551,9 @@ function WaterTreatmentPanel() {
       primaryLabel: "Cation resin", primaryDepth: resinBedDepth,
       freeboard_mm: resinFreeboardMm,
       saltPerRegen_kg, regensPerWeek, brineSaltStorage_kg, brineTankVolume_L,
+      serviceRunHr_result,
     };
-  }, [filterType, flow, sandRate, sandBedDepth, sandFreeboardMm,
+  }, [filterType, flow, sizeMode, fixedDiameterMm, sandRate, sandBedDepth, sandFreeboardMm,
       carbonMode, ebctMin, carbonVelocity, carbonBedDepth, carbonFreeboardMm,
       hardness, serviceRunHr, resinCapacity, resinBedDepth, resinFreeboardMm, saltDose, regensToStore]);
 
@@ -4340,6 +5592,21 @@ function WaterTreatmentPanel() {
     const pipeSize_mm = suggestPipeSizeMm(flow, pipeVelocity);
     return { straightHeight_mm, headDepth_mm, overallHeight_mm, pipeSize_mm };
   }, [process, allLayers, underdrainSpace, headType, legHeight, flow, pipeVelocity]);
+
+  const backwash = useMemo(() => {
+    if (filterType !== "sand") return null;
+    const rbw = rbwMode === "byTemp" ? interpTable(BACKWASH_RATE_BY_TEMP, "tempC", bwWaterTempC)
+              : rbwMode === "byES" ? interpTable(BACKWASH_RATE_BY_ES, "es", bwEffectiveSizeMm)
+              : rbwCustom;
+    const Qbw_m3hr = process.area * rbw; // Qbw = A x Rbw
+    const Qbw_Ls = Qbw_m3hr / 3.6;
+    const Vbw_m3 = Qbw_m3hr * (bwDurationMin / 60); // backwash water volume per cycle
+    const pipeRaw_mm = suggestPipeSizeMm(Qbw_m3hr, bwPipeVelocity);
+    const pipeStd = nearestStandardPipeOd(pipeRaw_mm);
+    const Qpump_m3hr = Qbw_m3hr * bwPumpOversize;
+    const backwashTankVolume_m3 = Vbw_m3 * bwTanksSimultaneous;
+    return { rbw, Qbw_m3hr, Qbw_Ls, Vbw_m3, pipeRaw_mm, pipeStd, Qpump_m3hr, backwashTankVolume_m3 };
+  }, [filterType, rbwMode, bwWaterTempC, bwEffectiveSizeMm, rbwCustom, process.area, bwDurationMin, bwPipeVelocity, bwPumpOversize, bwTanksSimultaneous]);
 
   const filterLabel = filterType === "sand" ? "Sand Filter" : filterType === "carbon" ? "Carbon Filter" : "Resin Softener";
 
@@ -4389,9 +5656,19 @@ function WaterTreatmentPanel() {
         <Plate title={`2. Flow & Bed Design — ${filterLabel}`}>
           <Field label="Design flow rate" unit="m³/hr" step="0.5" value={flow} onChange={setFlow} />
 
+          <div className="flex gap-2 mb-3">
+            <button onClick={() => setSizeMode("solve")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${sizeMode === "solve" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Solve vessel size")}</button>
+            <button onClick={() => setSizeMode("fixed")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${sizeMode === "fixed" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Fixed diameter")}</button>
+          </div>
+          {sizeMode === "fixed" && (
+            <Field label="Vessel inside diameter" unit="mm" step="10" value={fixedDiameterMm} onChange={setFixedDiameterMm} hint="Use this when the vessel size is already fixed (existing tank, available stock size, client-specified) — the tool back-calculates the resulting rate/EBCT/service run instead of sizing the diameter for you." />
+          )}
+
           {filterType === "sand" && (
             <>
-              <Field label="Filtration rate" unit="m/hr" step="0.5" value={sandRate} onChange={setSandRate} hint="Typical 10–15 m/hr for pressure sand filters." />
+              {sizeMode === "solve" && (
+                <Field label="Filtration rate" unit="m/hr" step="0.5" value={sandRate} onChange={setSandRate} hint="Typical 10–15 m/hr for pressure sand filters." />
+              )}
               <Field label="Sand bed depth" unit="mm" step="10" value={sandBedDepth} onChange={setSandBedDepth} hint="Typical 600–900mm. This depth (with the vessel area) determines vessel diameter." />
               <Field label="Freeboard height" unit="mm" step="10" value={sandFreeboardMm} onChange={setSandFreeboardMm} hint="Space above the bed for backwash expansion — 50% of bed depth is typical." />
               <div className="text-[10px] text-neutral-500 -mt-2 mb-3">≈ {sandBedDepth > 0 ? fmt((sandFreeboardMm/sandBedDepth)*100,0) : "—"}% of bed depth</div>
@@ -4404,15 +5681,17 @@ function WaterTreatmentPanel() {
 
           {filterType === "carbon" && (
             <>
-              <div className="flex gap-2 mb-3">
-                <button onClick={() => setCarbonMode("ebct")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${carbonMode === "ebct" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>By EBCT</button>
-                <button onClick={() => setCarbonMode("velocity")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${carbonMode === "velocity" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>By velocity</button>
-              </div>
-              {carbonMode === "ebct" ? (
+              {sizeMode === "solve" && (
+                <div className="flex gap-2 mb-3">
+                  <button onClick={() => setCarbonMode("ebct")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${carbonMode === "ebct" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("By EBCT")}</button>
+                  <button onClick={() => setCarbonMode("velocity")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${carbonMode === "velocity" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("By velocity")}</button>
+                </div>
+              )}
+              {sizeMode === "solve" && (carbonMode === "ebct" ? (
                 <Field label="Empty bed contact time (EBCT)" unit="min" step="0.5" value={ebctMin} onChange={setEbctMin} hint="5–10 min for dechlorination, 10–20 min for organics removal." />
               ) : (
                 <Field label="Linear velocity" unit="m/hr" step="0.5" value={carbonVelocity} onChange={setCarbonVelocity} hint="Typical 10–20 m/hr." />
-              )}
+              ))}
               <Field label="Carbon bed depth" unit="mm" step="10" value={carbonBedDepth} onChange={setCarbonBedDepth} hint="Typical 750–1500mm. In EBCT mode, this depth (with area) also sets vessel diameter." />
               <Field label="Freeboard height" unit="mm" step="10" value={carbonFreeboardMm} onChange={setCarbonFreeboardMm} hint="GAC expands 30–50% during backwash." />
               <div className="text-[10px] text-neutral-500 -mt-2 mb-3">≈ {carbonBedDepth > 0 ? fmt((carbonFreeboardMm/carbonBedDepth)*100,0) : "—"}% of bed depth</div>
@@ -4427,7 +5706,11 @@ function WaterTreatmentPanel() {
             <>
               <div className="grid grid-cols-2 gap-x-3">
                 <Field label="Raw water hardness" unit="mg/L as CaCO₃" step="10" value={hardness} onChange={setHardness} />
-                <Field label="Desired service run" unit="hours" step="1" value={serviceRunHr} onChange={setServiceRunHr} hint="Time between regenerations." />
+                {sizeMode === "solve" ? (
+                  <Field label="Desired service run" unit="hours" step="1" value={serviceRunHr} onChange={setServiceRunHr} hint="Time between regenerations." />
+                ) : (
+                  <Readout label="Achievable service run" value={fmt(process.serviceRunHr_result,1)} unit="hours" />
+                )}
               </div>
               <div className="grid grid-cols-2 gap-x-3">
                 <Field label="Resin operating capacity" unit="eq/L" step="0.05" value={resinCapacity} onChange={setResinCapacity} hint="~1.0–1.3 low salt dose, ~1.6–2.0 high salt dose." />
@@ -4446,6 +5729,51 @@ function WaterTreatmentPanel() {
             </>
           )}
         </Plate>
+
+        {filterType === "sand" && backwash && (
+          <Plate title="2b. Backwash Design (ANSI/AWWA B100-16)">
+            <div className="flex gap-2 mb-3">
+              <button onClick={() => setRbwMode("byTemp")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${rbwMode === "byTemp" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("By water temp")}</button>
+              <button onClick={() => setRbwMode("byES")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${rbwMode === "byES" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("By effective size")}</button>
+              <button onClick={() => setRbwMode("custom")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${rbwMode === "custom" ? "bg-emerald-500 text-neutral-950 border-emerald-500" : "border-neutral-700 text-neutral-300"}`}>{tr("Custom")}</button>
+            </div>
+            {rbwMode === "byTemp" && (
+              <Field label="Backwash water temperature" unit="°C" step="1" value={bwWaterTempC} onChange={setBwWaterTempC} hint="ANSI/AWWA B100-16 Table 1, fluidization rate for d₆₀≈0.7mm SG=2.65 sand. Interpolated between 5–30°C." />
+            )}
+            {rbwMode === "byES" && (
+              <Field label="Sand effective size (d₁₀)" unit="mm" step="0.05" value={bwEffectiveSizeMm} onChange={setBwEffectiveSizeMm} hint="Design-guide rate at 30°C water. Interpolated between 0.5–1.0mm." />
+            )}
+            {rbwMode === "custom" && (
+              <Field label="Backwash rate (Rbw)" unit="m³/m²·h" step="1" value={rbwCustom} onChange={setRbwCustom} />
+            )}
+            <Readout label="Backwash rate used (Rbw)" value={fmt(backwash.rbw,1)} unit="m³/m²·h" />
+            <div className="text-[10px] text-neutral-500 -mt-1 mb-3">
+              Target 20–25% bed expansion without washing media out; general design practice runs Rbw ≈ 40–50 m³/m²·h
+              for ~0.7–0.8mm sand at 25–30°C water.
+            </div>
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Backwash duration" unit="min" step="1" value={bwDurationMin} onChange={setBwDurationMin} hint="Typical 8–15 min depending on influent turbidity/bed fouling." />
+              <Field label="Backwash pipe velocity (target)" unit="m/s" step="0.1" value={bwPipeVelocity} onChange={setBwPipeVelocity} hint="1.5–2.5 m/s typical; 1.5–2.0 m/s common." />
+            </div>
+            <div className="grid grid-cols-2 gap-x-3">
+              <Field label="Backwash pump oversize factor" unit="×" step="0.05" value={bwPumpOversize} onChange={setBwPumpOversize} hint="10–20% above Qbw is typical (e.g. 1.2× → Qpump = 1.2 × Qbw)." />
+              <Field label="Tanks backwashed simultaneously" unit="—" step="1" value={bwTanksSimultaneous} onChange={setBwTanksSimultaneous} hint="Sets minimum backwash (surge) tank volume." />
+            </div>
+
+            <SubHeader>Result</SubHeader>
+            <Readout label="Backwash flow (Qbw)" value={fmt(backwash.Qbw_m3hr,2)} unit="m³/hr" big />
+            <Readout label="Backwash flow (Qbw)" value={fmt(backwash.Qbw_Ls,2)} unit="L/s" />
+            <Readout label="Backwash water volume / cycle" value={fmt(backwash.Vbw_m3,2)} unit="m³" />
+            <Readout label="Backwash pipe (calculated)" value={fmt(backwash.pipeRaw_mm,0)} unit="mm" />
+            <Readout label="Backwash pipe (standard size)" value={`${backwash.pipeStd?.nps ?? "—"}" (DN${fmt(backwash.pipeStd?.dn ?? 0,0)})`} unit="" big />
+            <Readout label="Backwash pump duty" value={fmt(backwash.Qpump_m3hr,2)} unit="m³/hr" />
+            <Readout label="Backwash (surge) tank volume, min." value={fmt(backwash.backwashTankVolume_m3,2)} unit="m³" big />
+            <div className="mt-2 text-[10px] text-neutral-500 leading-relaxed">
+              Qbw = A × Rbw. Backwash pump total head still needs a separate static + friction + minor-loss
+              calc (System Pressure Drop tool) before final pump selection — this only sizes the flow duty.
+            </div>
+          </Plate>
+        )}
 
         <Plate title="3. Media Layers (BOQ)">
           <div className="text-[10px] text-neutral-500 mb-2 leading-relaxed">
@@ -4493,7 +5821,7 @@ function WaterTreatmentPanel() {
             </div>
           ))}
           <button onClick={addMediaLayer} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">
-            + Add media layer
+            {tr("+ Add media layer")}
           </button>
         </Plate>
 
@@ -4531,7 +5859,7 @@ function WaterTreatmentPanel() {
             </div>
           ))}
           <button onClick={addComponent} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">
-            + Add component
+            {tr("+ Add component")}
           </button>
         </Plate>
 
@@ -4556,11 +5884,18 @@ function WaterTreatmentPanel() {
         <Plate title="Process sizing result">
           <Readout label="Cross-sectional area" value={fmt(process.area,3)} unit="m²" />
           <Readout label="Vessel diameter" value={fmt(process.diameter_mm,0)} unit="mm" big />
-          <Readout label="Service velocity" value={fmt(process.velocity ?? flow/process.area,1)} unit="m/hr" />
+          <Readout label="Service velocity" value={fmt(process.velocity ?? flow/process.area,1)} unit="m/hr"
+            warn={sizeMode === "fixed" && filterType === "sand" && (process.velocity < 10 || process.velocity > 15)} />
+          {sizeMode === "fixed" && filterType === "sand" && (process.velocity < 10 || process.velocity > 15) && (
+            <div className="text-[10px] text-amber-400 -mt-1 mb-2">Outside the typical 10–15 m/hr guideline for pressure sand filters at this diameter/flow.</div>
+          )}
           {filterType === "carbon" && (
             <>
               <Readout label="Bed volume" value={fmt(process.bedVolume,2)} unit="m³" />
-              <Readout label="Actual EBCT" value={fmt(process.actualEbct,1)} unit="min" />
+              <Readout label="Actual EBCT" value={fmt(process.actualEbct,1)} unit="min" warn={sizeMode === "fixed" && (process.actualEbct < 5 || process.actualEbct > 20)} />
+              {sizeMode === "fixed" && (process.actualEbct < 5 || process.actualEbct > 20) && (
+                <div className="text-[10px] text-amber-400 -mt-1 mb-2">Outside the typical 5–20 min EBCT guideline at this diameter/flow/bed depth.</div>
+              )}
             </>
           )}
           {filterType === "softener" && (
@@ -4583,16 +5918,7 @@ function WaterTreatmentPanel() {
       </div>
 
       <div className="print-sheet text-black bg-white p-6" style={{ fontFamily: "Arial, sans-serif" }}>
-        <div className="print-section flex justify-between items-start border-b-2 border-black pb-2 mb-3">
-          <div>
-            <div className="text-lg font-bold">WATER TREATMENT VESSEL DATA SHEET</div>
-            <div className="text-xs">{filterLabel}</div>
-          </div>
-          <div className="text-right text-xs">
-            <div>Doc No: {docNo || "—"}</div>
-            <div>Date: ____________________</div>
-          </div>
-        </div>
+        <PrintHeader title="WATER TREATMENT VESSEL DATA SHEET" subtitle={filterLabel} docNo={docNo} rev="0" sheet="DS-1" />
 
         <div className="print-section">
           <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
@@ -4626,6 +5952,23 @@ function WaterTreatmentPanel() {
             </tbody>
           </table>
         </div>
+
+        {filterType === "sand" && backwash && (
+          <div className="print-section">
+            <div className="font-bold text-sm mb-1 mt-3">BACKWASH DESIGN (ANSI/AWWA B100-16)</div>
+            <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
+              <tbody>
+                <tr><td className="border border-black px-2 py-1 font-bold">Backwash Rate (Rbw)</td><td className="border border-black px-2 py-1">{fmt(backwash.rbw,1)} m³/m²·h</td>
+                    <td className="border border-black px-2 py-1 font-bold">Backwash Flow (Qbw)</td><td className="border border-black px-2 py-1">{fmt(backwash.Qbw_m3hr,2)} m³/hr ({fmt(backwash.Qbw_Ls,2)} L/s)</td></tr>
+                <tr><td className="border border-black px-2 py-1 font-bold">Backwash Duration</td><td className="border border-black px-2 py-1">{fmt(bwDurationMin,0)} min</td>
+                    <td className="border border-black px-2 py-1 font-bold">Water Volume / Cycle</td><td className="border border-black px-2 py-1">{fmt(backwash.Vbw_m3,2)} m³</td></tr>
+                <tr><td className="border border-black px-2 py-1 font-bold">Backwash Pipe Size</td><td className="border border-black px-2 py-1">{backwash.pipeStd?.nps ?? "—"}" (DN{fmt(backwash.pipeStd?.dn ?? 0,0)})</td>
+                    <td className="border border-black px-2 py-1 font-bold">Backwash Pump Duty</td><td className="border border-black px-2 py-1">{fmt(backwash.Qpump_m3hr,2)} m³/hr</td></tr>
+                <tr><td className="border border-black px-2 py-1 font-bold">Backwash Tank Volume (min.)</td><td className="border border-black px-2 py-1" colSpan="3">{fmt(backwash.backwashTankVolume_m3,2)} m³ (for {fmt(bwTanksSimultaneous,0)} tank(s) backwashed simultaneously)</td></tr>
+              </tbody>
+            </table>
+          </div>
+        )}
 
         <div className="print-section">
           <div className="font-bold text-sm mb-1 mt-3">MECHANICAL / DIMENSIONAL</div>
@@ -4699,19 +6042,11 @@ function WaterTreatmentPanel() {
           </table>
         </div>
 
-        <div className="print-section">
-          <div className="grid grid-cols-3 gap-4 mt-6 text-xs">
-            <div>Prepared by: ______________________</div>
-            <div>Checked by: ______________________</div>
-            <div>Approved by: ______________________</div>
-          </div>
-          <div className="text-[9px] text-neutral-600 mt-4 leading-relaxed">
-            Preliminary process sizing for a {filterLabel.toLowerCase()} vessel. Media depths, filtration rates,
-            and resin capacity are typical design values — confirm against media/resin supplier data for the
-            actual product selected. This sheet does not include a full ASME pressure/thickness design; see the
-            Tank/Vessel tab for that calculation if a formal pressure vessel design is required.
-          </div>
-        </div>
+        <PrintSignatures />
+        <PrintNotes>
+          Process sizing per stated design flow and media parameters; media and resin specifications per
+          supplier data for the selected product. Pressure-part design per separate vessel calculation where required.
+        </PrintNotes>
       </div>
     </div>
   );
@@ -6076,19 +7411,19 @@ function SpecSheetPanel() {
         {emissionRows.length > 0 && (
           <Plate title="Emission guarantees at stack">
             {emissionRows.map((r) => <KVRow key={r.id} item={r} onChangeKey={(v) => emissionOps.update(r.id, "key", v)} onChangeVal={(v) => emissionOps.update(r.id, "value", v)} onRemove={() => emissionOps.remove(r.id)} />)}
-            <button onClick={() => emissionOps.add({ key: "", value: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add row</button>
+            <button onClick={() => emissionOps.add({ key: "", value: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">{tr("+ Add row")}</button>
           </Plate>
         )}
 
         <CategoryDivider>Technical & Safety</CategoryDivider>
         <Plate title="Technical specification">
           {techSpecRows.map((r) => <KVRow key={r.id} item={r} onChangeKey={(v) => techSpecOps.update(r.id, "key", v)} onChangeVal={(v) => techSpecOps.update(r.id, "value", v)} onRemove={() => techSpecOps.remove(r.id)} />)}
-          <button onClick={() => techSpecOps.add({ key: "", value: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add row</button>
+          <button onClick={() => techSpecOps.add({ key: "", value: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">{tr("+ Add row")}</button>
         </Plate>
 
         <Plate title="Recommended feedwater property">
           {feedwaterRows.map((r) => <KVRow key={r.id} item={r} onChangeKey={(v) => feedwaterOps.update(r.id, "key", v)} onChangeVal={(v) => feedwaterOps.update(r.id, "value", v)} onRemove={() => feedwaterOps.remove(r.id)} />)}
-          <button onClick={() => feedwaterOps.add({ key: "", value: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add row</button>
+          <button onClick={() => feedwaterOps.add({ key: "", value: "" })} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">{tr("+ Add row")}</button>
         </Plate>
 
         <Plate title="Control system & safety">
@@ -6134,7 +7469,7 @@ function SpecSheetPanel() {
                   <button onClick={() => removeMaterialRow(sec.id, m.id)} className="text-neutral-500 hover:text-red-400">✕</button>
                 </div>
               ))}
-              <button onClick={() => addMaterialRow(sec.id)} className="w-full py-1.5 mb-2 rounded text-[10px] font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add material row</button>
+              <button onClick={() => addMaterialRow(sec.id)} className="w-full py-1.5 mb-2 rounded text-[10px] font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">{tr("+ Add material row")}</button>
 
               <SubHeader>Nozzle table</SubHeader>
               {sec.nozzles.map((n) => (
@@ -6144,19 +7479,27 @@ function SpecSheetPanel() {
                   <input value={n.size} onChange={(e) => updateNozzleRow(sec.id, n.id, "size", e.target.value)} placeholder="Size" className="bg-neutral-900 border border-neutral-700 rounded px-1.5 py-1 text-neutral-100" />
                 </div>
               ))}
-              <button onClick={() => addNozzleRow(sec.id)} className="w-full py-1.5 mb-2 rounded text-[10px] font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add nozzle row</button>
+              <button onClick={() => addNozzleRow(sec.id)} className="w-full py-1.5 mb-2 rounded text-[10px] font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">{tr("+ Add nozzle row")}</button>
             </div>
           ))}
-          <button onClick={addEquipSection} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add equipment section</button>
+          <button onClick={addEquipSection} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">{tr("+ Add equipment section")}</button>
         </Plate>
       </div>
 
       <div className="print-sheet text-black bg-white p-6" style={{ fontFamily: "Arial, sans-serif" }}>
-        <div className="border-b-2 border-black pb-2 mb-3">
-          <div className="text-lg font-bold">{model}</div>
-          <div className="text-xs">{boilerType}</div>
-          <div className="text-xs mt-1">Client: {client || "—"} | Project: {projectName || "—"} | Doc: {docNo || "—"} Rev.{rev} | Date: {dateStr || "—"}</div>
-        </div>
+        <PrintHeader
+          title={model}
+          subtitle={`${boilerType} · Project Specification Sheet`}
+          docNo={docNo}
+          rev={rev}
+          date={dateStr}
+          extraRight={
+            <>
+              <tr><td className="border border-black px-2 py-0.5 font-bold">Client</td><td className="border border-black px-2 py-0.5">{client || "—"}</td></tr>
+              <tr><td className="border border-black px-2 py-0.5 font-bold">Project</td><td className="border border-black px-2 py-0.5">{projectName || "—"}</td></tr>
+            </>
+          }
+        />
 
         <div className="font-bold text-sm mb-1">BOILER SYSTEM OVERVIEW</div>
         <table className="w-full text-xs mb-3" style={{ borderCollapse: "collapse" }}>
@@ -6273,15 +7616,14 @@ function SpecSheetPanel() {
         <div className="font-bold text-sm mb-1">WARRANTY</div>
         <div className="text-xs mb-3 border border-black p-2">{fmt(warrantyYears,0)} years. {warrantyText}</div>
 
-        <div className="grid grid-cols-3 gap-4 mt-6 text-xs">
-          <div>Prepared by: ______________________</div>
-          <div>Checked by: ______________________</div>
-          <div>Approved by: ______________________</div>
-        </div>
-        <div className="text-[9px] text-neutral-600 mt-4 leading-relaxed">
-          Preliminary project spec sheet generated from a reusable template — figures should be confirmed
-          against the actual equipment supplier/vendor data before issue to a client.
-        </div>
+        <PrintSignatures roles={[
+          { label: "Prepared by", role: "Sales Engineer" },
+          { label: "Checked by", role: "Engineering" },
+          { label: "Approved by", role: "Managing Director" },
+        ]} />
+        <PrintNotes>
+          Specifications subject to final equipment selection and vendor data at contract stage.
+        </PrintNotes>
       </div>
     </div>
   );
@@ -6417,8 +7759,8 @@ function SteamTableStandalonePanel() {
     <div>
       <Plate title="Saturated steam table">
         <div className="flex gap-2 mb-3">
-          <button onClick={() => setSteamMode("byPressure")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${steamMode === "byPressure" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>By pressure</button>
-          <button onClick={() => setSteamMode("byTemp")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${steamMode === "byTemp" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>By temperature</button>
+          <button onClick={() => setSteamMode("byPressure")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${steamMode === "byPressure" ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-700 text-neutral-300"}`}>{tr("By pressure")}</button>
+          <button onClick={() => setSteamMode("byTemp")} className={`flex-1 py-2 rounded text-xs font-semibold uppercase tracking-wide border ${steamMode === "byTemp" ? "bg-sky-500 text-neutral-950 border-sky-500" : "border-neutral-700 text-neutral-300"}`}>{tr("By temperature")}</button>
         </div>
         {steamMode === "byPressure" ? (
           <>
@@ -6691,10 +8033,10 @@ function GanttPanel() {
           </div>
           <div className="grid grid-cols-2 gap-2 mb-2">
             <button onClick={copyForSheets} className="py-2 rounded text-xs font-bold uppercase tracking-wide bg-sky-600 text-white hover:bg-sky-500">
-              1. Copy schedule
+              {tr("1. Copy schedule")}
             </button>
             <button onClick={() => window.open("https://sheets.new", "_blank")} className="py-2 rounded text-xs font-bold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">
-              2. Open blank Google Sheet ↗
+              {tr("2. Open blank Google Sheet ↗")}
             </button>
           </div>
           {copyStatus && (
@@ -6791,7 +8133,7 @@ function GanttPanel() {
             </div>
           ))}
           <button onClick={addTask} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">
-            + Add task
+            {tr("+ Add task")}
           </button>
         </Plate>
 
@@ -6801,10 +8143,12 @@ function GanttPanel() {
       </div>
 
       <div className="print-sheet text-black bg-white p-6" style={{ fontFamily: "Arial, sans-serif" }}>
-        <div className="border-b-2 border-black pb-2 mb-3">
-          <div className="text-lg font-bold">{projectName || "Project Schedule"}</div>
-          <div className="text-xs">Client: {clientName || "—"} | Start: {gnFmtDate(gnAddDays(projectStartDate,0))} | Finish: {projectEndDate} | Duration: {fmt(Math.max(...computed.map((t) => t.endDay), 0),0)} days</div>
-        </div>
+        <PrintHeader
+          title={projectName || "Project Schedule"}
+          subtitle={`Client: ${clientName || "—"} · Start ${gnFmtDate(gnAddDays(projectStartDate,0))} · Finish ${projectEndDate} · ${fmt(Math.max(...computed.map((t) => t.endDay), 0),0)} days`}
+          docNo=""
+          rev="0"
+        />
         <GanttChartView computed={computed} totalDays={totalDays} monthMarks={monthMarks} todayOffset={todayOffset} todayVisible={todayVisible} dark={false} />
 
         <table className="w-full text-xs mt-4" style={{ borderCollapse: "collapse" }}>
@@ -6843,10 +8187,14 @@ function GanttPanel() {
             ))}
           </tbody>
         </table>
-        <div className="text-[9px] text-neutral-600 mt-4 leading-relaxed">
-          Schedule generated as a planning tool — actual dates subject to contract terms, site conditions, and
-          confirmed order/delivery dates.
-        </div>
+        <PrintSignatures roles={[
+          { label: "Prepared by", role: "Project Engineer" },
+          { label: "Checked by", role: "Project Manager" },
+          { label: "Approved by", role: "Client Representative" },
+        ]} />
+        <PrintNotes>
+          Baseline schedule. Dates subject to contract terms, site readiness, and confirmed delivery dates.
+        </PrintNotes>
       </div>
     </div>
   );
@@ -7014,12 +8362,12 @@ function ChatAssistantPanel() {
           />
           <button onClick={sendMessage} disabled={loading || !input.trim()}
             className="px-4 rounded text-xs font-bold uppercase tracking-wide bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed">
-            Send
+            {tr("Send")}
           </button>
         </div>
         {messages.length > 0 && (
           <button onClick={() => setMessages([])} className="mt-2 text-[10px] text-neutral-500 underline">
-            Clear conversation
+            {tr("Clear conversation")}
           </button>
         )}
       </Plate>
@@ -7125,7 +8473,7 @@ function ImportCostPanel() {
             <button onClick={() => removeCharge(c.id)} className="text-neutral-500 hover:text-red-400 text-xs pb-4">✕</button>
           </div>
         ))}
-        <button onClick={addCharge} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">+ Add charge</button>
+        <button onClick={addCharge} className="w-full py-2 rounded text-xs font-semibold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500">{tr("+ Add charge")}</button>
         <div className="text-[10px] text-neutral-500 mt-2">Preset amounts are editable placeholders — replace with your actual broker/port quotes.</div>
       </Plate>
 
@@ -7283,6 +8631,7 @@ const TOOL_CATALOG = [
     tools: [
       { id: "belt", icon: "⛓️", name: "Sidewall / Cleated Belt", desc: "Motor sizing, gear ratio, sprocket selection" },
       { id: "screw", icon: "🌀", name: "Screw Conveyor", desc: "Speed, mass flow, drive power" },
+      { id: "movingfloor", icon: "🚜", name: "Moving Floor Feeder", desc: "Walking floor stroke/cycle, capacity match, push force" },
       { id: "silo", icon: "🏗️", name: "Silo / Hopper", desc: "Volume, autonomy, flow check, reclaim screw, vibrator" },
     ],
   },
@@ -7331,6 +8680,12 @@ const TOOL_CATALOG = [
     ],
   },
   {
+    category: "Civil / Foundation",
+    tools: [
+      { id: "machinefoundation", icon: "🏛️", name: "Machine Foundation", desc: "Preliminary mass-ratio & bearing pressure check for equipment foundations" },
+    ],
+  },
+  {
     category: "Electrical & Instrumentation",
     tools: [
       { id: "motorcable", icon: "⚡", name: "Motor FLA & Cable Sizing", desc: "Full load current + voltage-drop cable check" },
@@ -7366,6 +8721,13 @@ function ToolIcon({ id, className }) {
       <svg {...p}>
         <rect x="7" y="3" width="10" height="18" rx="5" />
         <path d="M7 6 L17 10 M7 12 L17 16 M7 18 L17 21" />
+      </svg>
+    );
+    case "movingfloor": return (
+      <svg {...p}>
+        <rect x="3" y="6" width="18" height="9" rx="1" />
+        <path d="M6 6 V15 M10 6 V15 M14 6 V15 M18 6 V15" />
+        <path d="M9 19 L12 15 L15 19" />
       </svg>
     );
     case "silo": return (
@@ -7483,6 +8845,13 @@ function ToolIcon({ id, className }) {
         <line x1="12" y1="4" x2="12" y2="20" />
       </svg>
     );
+    case "machinefoundation": return (
+      <svg {...p}>
+        <rect x="4" y="15" width="16" height="5" rx="0.5" />
+        <rect x="9" y="4" width="6" height="11" />
+        <line x1="2" y1="20" x2="22" y2="20" />
+      </svg>
+    );
     case "unitconv": return (
       <svg {...p}>
         <path d="M4 8 H18 M14 4 L18 8 L14 12" />
@@ -7557,14 +8926,17 @@ const CATEGORY_COLORS = {
   "Boiler Engineering": "text-orange-400 group-hover:border-orange-500",
   "Energy Engineering": "text-lime-400 group-hover:border-lime-500",
   "Reference / Materials": "text-teal-400 group-hover:border-teal-500",
+  "Civil / Foundation": "text-stone-400 group-hover:border-stone-500",
   "Electrical & Instrumentation": "text-amber-400 group-hover:border-amber-500",
   "AI Assistant": "text-emerald-400 group-hover:border-emerald-500",
   "Commercial": "text-rose-400 group-hover:border-rose-500",
 };
 
-function ToolboxHome({ onSelect, lang, onToggleLang }) {
+function ToolboxHome({ onSelect, lang, onToggleLang, recent = [] }) {
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState({});
+  const allTools = TOOL_CATALOG.flatMap((g) => g.tools.map((t) => ({ ...t, category: g.category })));
+  const recentTools = recent.map((id) => allTools.find((t) => t.id === id)).filter(Boolean);
 
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -7583,8 +8955,12 @@ function ToolboxHome({ onSelect, lang, onToggleLang }) {
   return (
     <div>
       <div className="mb-4 flex items-center justify-center gap-3">
-        <h1 className="text-base font-bold text-neutral-50 tracking-tight">TPE Engineering Toolbox</h1>
-        <button onClick={onToggleLang} className="px-2 py-0.5 rounded text-[10px] font-bold border border-neutral-700 text-neutral-400 hover:border-amber-500 hover:text-amber-400">
+        <div className="w-9 h-9 rounded-lg border-2 border-amber-500 text-amber-400 flex items-center justify-center font-bold text-xs tracking-wider">TPE</div>
+        <div className="text-center">
+          <h1 className="text-base font-bold text-neutral-50 tracking-tight leading-tight">TPE Engineering Toolbox</h1>
+          <div className="text-[10px] text-neutral-400">{lang === "th" ? "เครื่องมือคำนวณวิศวกรรม — Thanaphon Engineering Co., Ltd." : "Engineering calculators — Thanaphon Engineering Co., Ltd."}</div>
+        </div>
+        <button onClick={onToggleLang} className="px-2 py-0.5 rounded text-[10px] font-bold border border-neutral-600 text-neutral-300 hover:border-amber-500 hover:text-amber-400">
           {lang === "th" ? "TH | en" : "th | EN"}
         </button>
       </div>
@@ -7607,6 +8983,24 @@ function ToolboxHome({ onSelect, lang, onToggleLang }) {
 
       {filtered.length === 0 && (
         <div className="text-center text-xs text-neutral-400 py-8">{tr("No tools match your search.")}</div>
+      )}
+
+      {!q && recentTools.length > 0 && (
+        <div className="mb-6">
+          <div className="text-[11px] uppercase tracking-wider text-neutral-400 font-bold mb-2">{tr("Recently used")}</div>
+          <div className="flex flex-wrap gap-2">
+            {recentTools.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => onSelect(t.id)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700 hover:border-amber-500 text-xs text-neutral-200 ${CATEGORY_COLORS[t.category]?.split(" ")[0] ?? ""}`}
+              >
+                <ToolIcon id={t.id} className="w-4 h-4" />
+                <span className="text-neutral-200">{tr(t.name)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       <div className="space-y-6">
@@ -7668,7 +9062,7 @@ class ToolboxErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ minHeight: "100vh", background: "#0a0a0a", color: "#e5e5e5", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "sans-serif" }}>
+        <div style={{ minHeight: "100vh", color: "inherit", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "sans-serif" }}>
           <div style={{ maxWidth: 420, textAlign: "center" }}>
             <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Something went wrong in this tool</div>
@@ -7690,42 +9084,155 @@ class ToolboxErrorBoundary extends React.Component {
 
 function ConveyorSizingCalculator() {
   const [tab, setTab] = useState(null); // null = home screen
+  const [recent, setRecent] = useState([]);
   const [sharedCapacityTPH, setSharedCapacityTPH] = useState(20);
   const [lang, setLang] = useState("th");
+  const [theme, setTheme] = useState("light"); // 'light' | 'dark'
+  const [navOpen, setNavOpen] = useState(false); // mobile drawer
   CURRENT_LANG = lang; // module-level, read by tr() everywhere on each render
   const toggleLang = () => setLang(lang === "th" ? "en" : "th");
+  const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
+
+  React.useEffect(() => {
+    const el = document.documentElement;
+    el.classList.toggle("theme-light", theme === "light");
+    el.classList.toggle("theme-dark", theme === "dark");
+  }, [theme]);
+
+  const openTool = (id) => {
+    setTab(id);
+    setNavOpen(false);
+    if (id) setRecent((r) => [id, ...r.filter((x) => x !== id)].slice(0, 6));
+    window.scrollTo({ top: 0 });
+  };
 
   const currentTool = TOOL_CATALOG.flatMap((g) => g.tools).find((t) => t.id === tab);
+  const currentCategory = TOOL_CATALOG.find((g) => g.tools.some((t) => t.id === tab))?.category;
+
+  const ThemeButton = () => (
+    <button onClick={toggleTheme} title={theme === "light" ? "Dark theme" : "Light theme"}
+      className="px-2 py-1.5 rounded text-[10px] font-bold border border-neutral-600 text-neutral-300 hover:border-amber-500 hover:text-amber-400 shrink-0">
+      {theme === "light" ? "☾" : "☀"}
+    </button>
+  );
+  const LangButton = () => (
+    <button onClick={toggleLang} className="px-2 py-1.5 rounded text-[10px] font-bold border border-neutral-600 text-neutral-300 hover:border-amber-500 hover:text-amber-400 shrink-0">
+      {lang === "th" ? "TH | en" : "th | EN"}
+    </button>
+  );
+
+  const sidebar = (
+    <div className="p-4">
+      <button onClick={() => openTool(null)} className="flex items-center gap-3 mb-4 w-full text-left group">
+        <div className="w-9 h-9 rounded-lg border-2 border-amber-500 text-amber-400 flex items-center justify-center font-bold text-xs tracking-wider shrink-0">TPE</div>
+        <div className="min-w-0">
+          <div className="text-sm font-bold text-neutral-50 leading-tight group-hover:text-amber-400">Engineering Toolbox</div>
+          <div className="text-[10px] text-neutral-400 truncate">Thanaphon Engineering Co., Ltd.</div>
+        </div>
+      </button>
+      <div className="flex gap-2 mb-4">
+        <button onClick={() => openTool(null)} className={`flex-1 py-1.5 rounded text-[11px] font-bold border ${tab === null ? "bg-amber-500 text-neutral-950 border-amber-500" : "border-neutral-600 text-neutral-300 hover:border-amber-500"}`}>
+          ⌂ {tr("Toolbox")}
+        </button>
+        <ThemeButton />
+        <LangButton />
+      </div>
+      {TOOL_CATALOG.map((group) => (
+        <div key={group.category} className="mb-4">
+          <div className={`text-[10px] uppercase tracking-wider font-bold mb-1.5 px-2 ${CATEGORY_COLORS[group.category]?.split(" ")[0] ?? "text-neutral-400"}`}>
+            {tr(group.category)}
+          </div>
+          <div className="space-y-0.5">
+            {group.tools.map((t) => {
+              const active = t.id === tab;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => openTool(t.id)}
+                  title={tr(t.desc)}
+                  className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-left text-[12px] transition-colors border ${
+                    active
+                      ? "bg-amber-500 text-neutral-950 border-amber-500 font-bold"
+                      : "border-transparent text-neutral-300 hover:bg-neutral-800 hover:text-neutral-50"
+                  }`}
+                >
+                  <ToolIcon id={t.id} className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{tr(t.name)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      <div className="text-[9px] text-neutral-500 leading-snug px-2 mt-2">
+        {lang === "th" ? "เครื่องมือคำนวณเบื้องต้น — ตรวจสอบกับข้อมูลผู้ผลิตและมาตรฐานก่อนใช้งานจริง" : "Preliminary sizing tools — confirm against manufacturer data and applicable codes."}
+      </div>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4 md:p-6">
-      <div className="max-w-5xl mx-auto">
-        {tab === null ? (
-          <ToolboxHome onSelect={setTab} lang={lang} onToggleLang={toggleLang} />
-        ) : (
-          <>
-            <div className="flex items-center gap-3 mb-5 border-b border-neutral-800 pb-4">
-              <button
-                onClick={() => setTab(null)}
-                className="px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide border border-neutral-700 text-neutral-300 hover:border-amber-500 hover:text-amber-400 shrink-0"
-              >
-                ← Toolbox
-              </button>
-              <div className="min-w-0 flex-1">
-                <div className="text-[10px] uppercase tracking-[0.15em] text-neutral-500 font-semibold truncate">
-                  {tr(TOOL_CATALOG.find((g) => g.tools.some((t) => t.id === tab))?.category)}
-                </div>
-                <h1 className="text-lg font-bold text-neutral-50 tracking-tight truncate">{tr(currentTool?.name)}</h1>
+    <div className="min-h-screen bg-neutral-950 text-neutral-100">
+      <div className="flex min-h-screen">
+        <aside className="app-sidebar no-print hidden lg:block w-64 shrink-0 sticky top-0 h-screen overflow-y-auto border-r border-neutral-800 bg-neutral-900">
+          {sidebar}
+        </aside>
+        {navOpen && (
+          <div className="lg:hidden fixed inset-0 z-50">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setNavOpen(false)} />
+            <aside className="app-sidebar absolute left-0 top-0 h-full w-72 overflow-y-auto bg-neutral-900 border-r border-neutral-800 shadow-xl">
+              <div className="flex justify-end px-3 pt-3">
+                <button onClick={() => setNavOpen(false)} className="text-neutral-400 hover:text-neutral-50 text-lg leading-none">✕</button>
               </div>
-              <button onClick={toggleLang} className="px-2 py-1 rounded text-[10px] font-bold border border-neutral-700 text-neutral-400 hover:border-amber-500 hover:text-amber-400 shrink-0">
-                {lang === "th" ? "TH | en" : "th | EN"}
-              </button>
-            </div>
+              {sidebar}
+            </aside>
+          </div>
+        )}
+
+        <main className="flex-1 min-w-0">
+          <div className="max-w-3xl mx-auto px-4 md:px-6 py-4 md:py-6">
+            {tab === null ? (
+              <>
+                <div className="lg:hidden no-print flex items-center justify-between mb-3">
+                  <button onClick={() => setNavOpen(true)} className="px-3 py-1.5 rounded text-xs font-bold border border-neutral-600 text-neutral-200 hover:border-amber-500">☰ {tr("Menu")}</button>
+                  <div className="flex gap-2"><ThemeButton /></div>
+                </div>
+                <ToolboxHome onSelect={openTool} lang={lang} onToggleLang={toggleLang} recent={recent} />
+              </>
+            ) : (
+              <>
+                <div className="no-print sticky top-0 z-30 -mx-4 md:-mx-6 px-4 md:px-6 py-3 mb-5 bg-neutral-950/95 backdrop-blur border-b border-neutral-800 flex items-center gap-3">
+                  <button onClick={() => setNavOpen(true)} className="lg:hidden px-2.5 py-1.5 rounded text-xs font-bold border border-neutral-600 text-neutral-200 hover:border-amber-500 shrink-0">☰</button>
+                  <button
+                    onClick={() => openTool(null)}
+                    className="hidden lg:block px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wide border border-neutral-600 text-neutral-200 hover:border-amber-500 hover:text-amber-400 shrink-0"
+                  >
+                    ← {tr("Toolbox")}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] uppercase tracking-[0.15em] text-neutral-400 font-semibold truncate">{tr(currentCategory)}</div>
+                    <h1 className="text-lg font-bold text-neutral-50 tracking-tight truncate">{tr(currentTool?.name)}</h1>
+                  </div>
+                  <select
+                    value={tab}
+                    onChange={(e) => openTool(e.target.value)}
+                    title={tr("Switch tool")}
+                    className="hidden sm:block lg:hidden max-w-[220px] bg-neutral-900 border border-neutral-600 rounded px-2 py-1.5 text-xs text-neutral-200 focus:border-amber-500 focus:outline-none"
+                  >
+                    {TOOL_CATALOG.map((g) => (
+                      <optgroup key={g.category} label={tr(g.category)}>
+                        {g.tools.map((t) => <option key={t.id} value={t.id}>{tr(t.name)}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <div className="lg:hidden flex gap-2"><ThemeButton /><LangButton /></div>
+                </div>
 
             {tab === "belt" ? (
               <BeltConveyorPanel capacityTPH={sharedCapacityTPH} setCapacityTPH={setSharedCapacityTPH} />
             ) : tab === "screw" ? (
               <ScrewConveyorPanel beltCapacityTPH={sharedCapacityTPH} />
+            ) : tab === "movingfloor" ? (
+              <MovingFloorPanel beltCapacityTPH={sharedCapacityTPH} />
             ) : tab === "silo" ? (
               <SiloHopperPanel />
             ) : tab === "tank" ? (
@@ -7758,6 +9265,8 @@ function ConveyorSizingCalculator() {
               <GanttPanel />
             ) : tab === "steel" ? (
               <SteelPropertiesPanel />
+            ) : tab === "machinefoundation" ? (
+              <MachineFoundationPanel />
             ) : tab === "unitconv" ? (
               <UnitConverterPanel />
             ) : tab === "bolttorque" ? (
@@ -7777,8 +9286,10 @@ function ConveyorSizingCalculator() {
             ) : (
               <SignalScalingPanel />
             )}
-          </>
-        )}
+              </>
+            )}
+          </div>
+        </main>
       </div>
     </div>
   );

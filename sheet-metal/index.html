@@ -63,7 +63,7 @@ table.t td.n{font-family:var(--mono);text-align:right;white-space:nowrap}
 </style>
 </head><body><div id="app">
   <header class="topbar">
-    <div class="brand"><i></i>TPE Sheet Metal</div>
+    <div class="brand"><i></i>TPE Sheet Metal <small style="color:var(--muted);letter-spacing:0">v1.1</small></div>
     <input class="projname" id="projName" aria-label="ชื่องาน" placeholder="ชื่องาน / Job">
     <div style="position:relative"><button class="btn" id="bFile">ไฟล์ ▾</button>
       <div class="drop" id="fileMenu" hidden>
@@ -71,6 +71,7 @@ table.t td.n{font-family:var(--mono);text-align:right;white-space:nowrap}
       </div></div>
     <span class="sp"></span>
     <button class="btn ghost" id="bHelp">วิธีพิมพ์แบบ 1:1</button>
+    <button class="btn" id="bDxf" title="ไฟล์ DXF 1:1 หน่วย มม. สำหรับเครื่องตัด CNC / Laser / Plasma">Export DXF</button>
     <button class="btn primary" id="bPdf">Export PDF แบบตัด 1:1 (A3)</button>
   </header>
   <div class="main">
@@ -91,6 +92,7 @@ table.t td.n{font-family:var(--mono);text-align:right;white-space:nowrap}
       <div id="warns"></div>
       <table class="t" id="ptab"></table>
       <table class="t" id="itab" style="margin-top:8px"></table>
+      <div id="ordw"></div>
     </aside>
     <section class="work" id="work">
       <canvas id="gl"></canvas><canvas id="fc" hidden></canvas>
@@ -113,7 +115,8 @@ table.t td.n{font-family:var(--mono);text-align:right;white-space:nowrap}
     <li>ตัดกระดาษหน้าขวา/ล่างตามกรอบเส้นประด้าน <b>ซ้ายและบน</b> แล้ววางทับหน้าก่อนหน้า ให้เครื่องหมาย <b>+</b> ในแถบทับซ้อนตรงกัน ติดเทป</li>
     <li>วางแบบบนแผ่นเหล็ก ตอก/ขีดตามเส้นตัด เส้นพับ (เส้นประน้ำเงิน) และเส้นมาร์ก (สำหรับม้วน/พับเป็นจังหวะ)</li>
   </ol>
-  <p class="hint">ขนาดคลี่คิดที่ <b>กลางเนื้อ</b> (Neutral) ตามความหนา — ตั้งได้ว่า D/ขนาดที่ป้อนเป็นขนาดภายใน ภายนอก หรือกลางเนื้อ · งานพับคิด Bend allowance จาก K-factor</p>
+  <p class="hint">ขนาดคลี่คิดที่ <b>กลางเนื้อ</b> (Neutral) ตามความหนา — ตั้งได้ว่า D/ขนาดที่ป้อนเป็นขนาดภายใน ภายนอก หรือกลางเนื้อ (งานเอียง เช่น กรวย/ปล่องลด ชดเชยความหนาเป็น t/cosα) · งานพับคิด Bend allowance จาก K-factor (ตารางวัสดุ หรือ DIN 6935 ตาม r/t)</p>
+  <p class="hint">ไม่มีเครื่องพิมพ์ A3? ใช้ <b>ตารางระยะ</b> (ข้องอกุ้ง / ท่อสาขา) ขีดแบบด้วยมือ · มีเครื่องตัด CNC ใช้ <b>Export DXF</b> (1:1 มม., Layer CUT / BEND / MARK / TEXT)</p>
   <div style="text-align:right;margin-top:10px"><button class="btn primary" id="helpOk">เข้าใจแล้ว</button></div></div></div>
 <script>
 (()=>{'use strict';
@@ -181,13 +184,16 @@ const SHEETS={'1219x2438':[1219,2438],'1524x3048':[1524,3048],'1219x3048':[1219,
 const BASIS=[['ID','ขนาดภายใน (ID)'],['OD','ขนาดภายนอก (OD)'],['MEAN','ขนาดกลางเนื้อ (Mean)']];
 /* mean (neutral) size from a given size: ID → +t, OD → −t */
 const mean=(v,b,t)=>b==='ID'?v+t:b==='OD'?v-t:v;
+/* same, for a wall that leans at angle α from vertical: horizontal wall thickness is t/cosα (matters for thick plate / flat cones) */
+const meanS=(v,b,t,c)=>mean(v,b,t/Math.max(0.05,c));
 const tri3=(rows)=>{const t=[];for(let i=0;i+1<rows.length;i++)for(let k=0;k+1<rows[i].length;k++){const a=rows[i][k],b=rows[i][k+1],c=rows[i+1][k],d=rows[i+1][k+1];t.push([a,b,d],[a,d,c]);}return t;};
 
 /* ---------- round → round (cylinder, concentric / eccentric cone) ---------- */
 function roundStrip(R1,R2,H,ex,ey,seam,n,lap,name,mk=12){
   let N=Math.max(48,arcN(Math.max(R1,R2),2*PI));const m=12*n;N=Math.min(2880,Math.ceil(N/m)*m);
   const e=Math.hypot(ex,ey),off=e>0.01?Math.atan2(ey,ex):-PI/2,f0=seam==='long'?off+PI:off;
-  const P=[],Q=[];for(let k=0;k<=N;k++){const f=f0+2*PI*k/N;P.push([R1*Math.cos(f),R1*Math.sin(f),0]);Q.push([ex+R2*Math.cos(f),ey+R2*Math.sin(f),H]);}
+  const cf=(PI/N)/Math.sin(PI/N),R1c=R1*cf,R2c=R2*cf; // vertices pushed out so the chord polygon has the true arc length (π·D exact)
+  const P=[],Q=[];for(let k=0;k<=N;k++){const f=f0+2*PI*k/N;P.push([R1c*Math.cos(f),R1c*Math.sin(f),0]);Q.push([ex+R2c*Math.cos(f),ey+R2c*Math.sin(f),H]);}
   const steps=pairSteps(P,Q),cuts=[];for(let k=1;k<n;k++)cuts.push([k*N/n,k*N/n]);
   const parts=splitStrip(P,Q,steps,cuts),step=N/mk;
   const pieces=parts.map((pt,ix)=>{const U=unfoldStrip(pt.P,pt.Q,pt.steps);const idx=[];U.lines.forEach((l,k)=>{if(l[2]===l[3]&&l[2]%step===0&&l[2]>0&&l[2]<pt.P.length-1)idx.push(k);});
@@ -205,12 +211,14 @@ SHAPES.cone={g:'round',th:'กรวยลด ตรงศูนย์ / เย�
     {k:'seam',l:'ตำแหน่งตะเข็บ',type:'sel',opts:[['short','ด้านสั้น (ด้านเยื้อง)'],['long','ด้านยาว']],def:'short'},
     {k:'n',l:'แบ่งเป็น (ชิ้น)',type:'sel',opts:[[1,'1 ชิ้น'],[2,'2 ชิ้น'],[3,'3 ชิ้น'],[4,'4 ชิ้น'],[6,'6 ชิ้น']],def:1},{k:'lap',l:'เผื่อตะเข็บ/ทับ',u:'มม.',def:0}],
   presets:[['ตรงศูนย์',p=>({ex:0,ey:0})],['เยื้องศูนย์ ราบด้านเดียว',p=>({ex:Math.round((p.D1-p.D2)/2),ey:0})]],
-  build(p,G){const r1=mean(p.D1,p.basis,G.t)/2,r2=mean(p.D2,p.basis,G.t)/2,warn=[];if(r1<=0||r2<0)warn.push('ขนาดไม่ถูกต้อง');
+  build(p,G){const e0=Math.hypot(p.ex,p.ey),dr=(p.D1-p.D2)/2,cw=(Math.cos(Math.atan2(Math.abs(dr-e0),p.H))+Math.cos(Math.atan2(Math.abs(dr+e0),p.H)))/2;
+    const r1=meanS(p.D1,p.basis,G.t,cw)/2,r2=meanS(p.D2,p.basis,G.t,cw)/2,warn=[];if(r1<=0||r2<0)warn.push('ขนาดไม่ถูกต้อง');
     const R=roundStrip(r1,r2,p.H,+p.ex,+p.ey,p.seam,+p.n,p.lap,'Cone');const info=[];
     if(Math.abs(p.ex)<0.01&&Math.abs(p.ey)<0.01&&Math.abs(r1-r2)>0.01){const s=Math.hypot(p.H,r1-r2),Lb=r1*s/Math.abs(r1-r2),Ls=Lb-s,th=2*PI*r1/Lb*R2D;
       info.push(['ความยาวตามแนวเอียง (Slant)',fmt1(s)+' มม.'],['รัศมีคลี่ วงนอก / วงใน',fmt1(Lb)+' / '+fmt1(Ls)+' มม.'],['มุมแผ่นคลี่ (Sector)',fmt(th,2)+'°'],['มุมกรวย (ครึ่งยอด)',fmt(Math.atan2(Math.abs(r1-r2),p.H)*R2D,2)+'°']);}
     else info.push(['แบบ','กรวยเยื้องศูนย์ — คลี่ด้วย Triangulation']);
-    info.push(['เส้นรอบวงคลี่ ล่าง / บน',fmt1(2*PI*r1)+' / '+fmt1(2*PI*r2)+' มม.']);return {...R,info,warn};}};
+    info.push(['เส้นรอบวงคลี่ ล่าง / บน',fmt1(2*PI*r1)+' / '+fmt1(2*PI*r2)+' มม.'],['D กลางเนื้อ ล่าง / บน',fmt1(2*r1)+' / '+fmt1(2*r2)+' มม.']);
+    if(p.basis!=='MEAN'&&cw<0.995)info.push(['ชดเชยความหนาตามแนวเอียง','t/cosα = '+fmt(G.t/cw,2)+' มม.']);return {...R,info,warn};}};
 /* ---------- lobster-back (segmented) elbow ---------- */
 SHAPES.lobster={g:'round',th:'ข้องอกุ้ง (Lobster / Segmented elbow)',en:'Segmented elbow',icon:'lob',
   params:[{k:'D',l:'เส้นผ่านศูนย์กลาง D',u:'มม.',def:500},{k:'R',l:'รัศมีโค้งกลาง R',u:'มม.',def:750},{k:'A',l:'มุมเลี้ยว',u:'°',def:90},
@@ -232,25 +240,29 @@ SHAPES.lobster={g:'round',th:'ข้องอกุ้ง (Lobster / Segmented e
         const s0=g===0?-p.ext:q*Math.tan(lo-ta),s1=g===n-1?p.ext:q*Math.tan(hi-ta);rows.push([vadd(base,vmul(tv(ta),s0)),vadd(base,vmul(tv(ta),s1))]);}
       tris.push(...tri3(rows));}
     for(const t of tris)for(let i=0;i<3;i++)t[i]=[t[i][0],t[i][2],t[i][1]]; // stand the elbow up (XZ plane)
-    return {pieces,tris,warn,info:[['มุมต่อชิ้นกลาง (α)',fmt(al*R2D,2)+'°'],['มุมตัดปลาย (α/2)',fmt(al*R2D/2,2)+'°'],['ชิ้นปลาย 2 + ชิ้นกลาง',String(n-2)],['เส้นรอบวงคลี่',fmt1(C)+' มม.'],
+    const ord={title:'ตารางระยะ ข้องอกุ้ง (วัดจากเส้นฐาน, 12 ส่วน, ส่วนที่ 0 = ด้านใน/ตะเข็บ)',head:['จุด','ระยะคลี่ X','ชิ้นปลาย สูง','ชิ้นกลาง ±'],
+      rows:Array.from({length:13},(_,i)=>{const k=i*N/12;return [String(i),fmt(X(k),1),fmt(p.ext+hh(k),1),fmt(hh(k),1)];})};
+    return {pieces,tris,warn,ord,info:[['มุมต่อชิ้นกลาง (α)',fmt(al*R2D,2)+'°'],['มุมตัดปลาย (α/2)',fmt(al*R2D/2,2)+'°'],['ชิ้นปลาย 2 + ชิ้นกลาง',String(n-2)],['เส้นรอบวงคลี่',fmt1(C)+' มม.'],
       ['ความยาวตามแนวโค้ง (centerline)',fmt1(R*A+2*p.ext)+' มม.']]};}};
 /* ---------- branch / tee (cylinder–cylinder intersection) ---------- */
 SHAPES.tee={g:'round',th:'ท่อแยก / ท่อสาขา (Tee, Lateral)',en:'Branch',icon:'tee',
   params:[{k:'D1',l:'D ท่อหลัก',u:'มม.',def:600},{k:'D2',l:'D ท่อสาขา',u:'มม.',def:400},{k:'B',l:'มุมสาขากับท่อหลัก',u:'°',def:90},
     {k:'e',l:'เยื้องศูนย์ด้านข้าง (e)',u:'มม.',def:0},{k:'Lb',l:'ความยาวสาขา (จากแกนท่อหลัก)',u:'มม.',def:600},{k:'basis',l:'D ที่ระบุคือ',type:'sel',opts:BASIS,def:'OD'},
+    {k:'fit',l:'รูปแบบการต่อ',type:'sel',opts:[['on','วางบนผิว (Set-on)'],['in','สอดเข้าในรู (Set-in)']],def:'on'},
     {k:'main',l:'คลี่ท่อหลักพร้อมรูเจาะ',type:'sel',opts:[[1,'ใช่'],[0,'ไม่']],def:1},{k:'Lm',l:'ความยาวท่อหลัก',u:'มม.',def:1200},{k:'xm',l:'ตำแหน่งสาขา (จากปลายซ้าย)',u:'มม.',def:600},{k:'lap',l:'เผื่อตะเข็บ/ทับ',u:'มม.',def:0}],
   build(p,G){const t=G.t,R1m=mean(p.D1,p.basis,t)/2,Ro=R1m+t/2,r=mean(p.D2,p.basis,t)/2,ro=r+t/2,b=p.B*D2R,sb=Math.sin(b),cb=Math.cos(b),e=+p.e,warn=[];
     if(Math.abs(e)+r>Ro+1e-6)warn.push('ท่อสาขาใหญ่เกิน/เยื้องเกินท่อหลัก — ต้องให้ |e| + r ≤ R ท่อหลัก');
     if(p.B<15||p.B>90)warn.push('มุมสาขาควรอยู่ระหว่าง 15°–90°');
+    const setin=p.fit==='in',Rcut=setin?R1m-t/2:Ro,hr=setin?ro:Math.max(0.1,r-t/2); // set-on: branch rests on main OD, hole = branch ID · set-in: branch flush with main ID, hole = branch OD
     const N=Math.max(96,arcN(r,2*PI)),C=2*PI*r,f0=PI/2;
     const sAt=(f,rr,RR)=>{const y=Math.max(-RR,Math.min(RR,e+rr*Math.sin(f)));return (Math.sqrt(RR*RR-y*y)-rr*Math.cos(f)*cb)/sb;};
-    const bot=[],top=[];for(let k=0;k<=N;k++){const f=f0+2*PI*k/N;bot.push([C*k/N,0]);top.push([C*k/N,p.Lb-sAt(f,r,Ro)]);}
+    const bot=[],top=[];for(let k=0;k<=N;k++){const f=f0+2*PI*k/N;bot.push([C*k/N,0]);top.push([C*k/N,p.Lb-sAt(f,r,Rcut)]);}
     /* branch outline: straight end at y=0 (free end), cut curve on the other side */
     const br=[...bot];if(p.lap>0)br.push([C+p.lap,0],[C+p.lap,top[N][1]]);br.push(...[...top].reverse());
     const marks=[];for(let k=1;k<12;k++){const i=Math.round(k*N/12);marks.push({a:bot[i],b:top[i]});}
     const pieces=[{name:'Branch (ท่อสาขา)',qty:1,outline:br,holes:[],marks,bends:p.lap>0?[{a:[C,0],b:[C,top[N][1]],txt:'ตะเข็บ/ทับ',kind:'lap'}]:[],seams:[]}];
     let hole=null;
-    if(+p.main){const Cm=2*PI*R1m,M=Math.max(180,arcN(ro,2*PI));hole=[];for(let k=0;k<M;k++){const f=2*PI*k/M,y=e+ro*Math.sin(f);if(Math.abs(y)>R1m)continue;const z=Math.sqrt(R1m*R1m-y*y),s=(z-ro*Math.cos(f)*cb)/sb,x=+p.xm+s*cb-ro*Math.cos(f)*sb;hole.push([x,R1m*Math.atan2(y,z)+Cm/2]);}
+    if(+p.main){const Cm=2*PI*R1m,M=Math.max(180,arcN(ro,2*PI));hole=[];for(let k=0;k<M;k++){const f=2*PI*k/M,y=e+hr*Math.sin(f);if(Math.abs(y)>R1m)continue;const z=Math.sqrt(R1m*R1m-y*y),s=(z-hr*Math.cos(f)*cb)/sb,x=+p.xm+s*cb-hr*Math.cos(f)*sb;hole.push([x,R1m*Math.atan2(y,z)+Cm/2]);}
       const mo=[[0,0],[p.Lm,0],[p.Lm,Cm],[0,Cm]];if(p.lap>0)mo.splice(2,0,[p.Lm,Cm],[p.Lm,Cm+p.lap],[0,Cm+p.lap]);
       const hb=bbox(hole);if(hb.x0<0||hb.x1>p.Lm)warn.push('รูเจาะเกินความยาวท่อหลัก — ปรับตำแหน่ง/ความยาว');
       pieces.push({name:'Main shell + hole (ท่อหลัก)',qty:1,outline:p.lap>0?[[0,0],[p.Lm,0],[p.Lm,Cm+p.lap],[0,Cm+p.lap]]:mo,holes:[hole],
@@ -258,9 +270,11 @@ SHAPES.tee={g:'round',th:'ท่อแยก / ท่อสาขา (Tee, Later
     /* 3D: main along X (0..Lm), branch from axis point (xm, e, 0) */
     const tris=[],M3=64,Lm=+p.main?+p.Lm:Math.max(p.D1*2,2*(p.Lb*Math.abs(cb)+p.D2)),x0=+p.main?0:+p.xm-Lm/2;
     {const rows=[];for(let k=0;k<=M3;k++){const f=2*PI*k/M3;rows.push([[x0,R1m*Math.sin(f),R1m*Math.cos(f)],[x0+Lm,R1m*Math.sin(f),R1m*Math.cos(f)]]);}tris.push(...tri3(rows));}
-    {const rows=[],d=[cb,0,sb],u=[-sb,0,cb];for(let k=0;k<=M3;k++){const f=f0+2*PI*k/M3,base=vadd([+p.xm,e,0],vadd(vmul(u,r*Math.cos(f)),[0,r*Math.sin(f),0]));rows.push([vadd(base,vmul(d,sAt(f,r,Ro))),vadd(base,vmul(d,+p.Lb))]);}tris.push(...tri3(rows));}
-    return {pieces,tris,warn,info:[['เส้นรอบวงคลี่ ท่อสาขา',fmt1(C)+' มม.'],['สาขาสั้นสุด / ยาวสุด',fmt1(Math.min(...top.map(q=>q[1])))+' / '+fmt1(Math.max(...top.map(q=>q[1])))+' มม.'],
-      ...(hole?[['ขนาดรูเจาะ (กว้าง × ยาวคลี่)',fmt1(bbox(hole).w)+' × '+fmt1(bbox(hole).h)+' มม.']]:[]),['รูปแบบ','สาขาวางบนผิวนอกท่อหลัก (Set-on)']]};}};
+    {const rows=[],d=[cb,0,sb],u=[-sb,0,cb];for(let k=0;k<=M3;k++){const f=f0+2*PI*k/M3,base=vadd([+p.xm,e,0],vadd(vmul(u,r*Math.cos(f)),[0,r*Math.sin(f),0]));rows.push([vadd(base,vmul(d,sAt(f,r,Rcut))),vadd(base,vmul(d,+p.Lb))]);}tris.push(...tri3(rows));}
+    const ord={title:'ตารางระยะ ท่อสาขา (ความยาวจากปลายตรง, 12 ส่วน, ส่วนที่ 0 = ตะเข็บ)',head:['จุด','ระยะคลี่ X','ความยาวสาขา',''],
+      rows:Array.from({length:13},(_,i)=>{const k=Math.round(i*N/12);return [String(i),fmt(top[k][0],1),fmt(top[k][1],1),''];})};
+    return {pieces,tris,warn,ord,info:[['เส้นรอบวงคลี่ ท่อสาขา',fmt1(C)+' มม.'],['สาขาสั้นสุด / ยาวสุด',fmt1(Math.min(...top.map(q=>q[1])))+' / '+fmt1(Math.max(...top.map(q=>q[1])))+' มม.'],
+      ...(hole?[['ขนาดรูเจาะ (กว้าง × ยาวคลี่)',fmt1(bbox(hole).w)+' × '+fmt1(bbox(hole).h)+' มม.']]:[]),['รูปแบบ',setin?'สาขาสอดเข้า (Set-in) — รูเจาะ = OD สาขา':'สาขาวางบนผิว (Set-on) — รูเจาะ = ID สาขา']]};}};
 /* ---------- rectangle → round ---------- */
 function rectPath(a,b,cx,cy,z,mids=true){const C=[[cx+a,cy-b],[cx+a,cy+b],[cx-a,cy+b],[cx-a,cy-b]],M=[[cx,cy-b],[cx+a,cy],[cx,cy+b],[cx-a,cy]];
   const o=mids?[M[0],C[0],M[1],C[1],M[2],C[2],M[3],C[3],M[0]]:[C[3],C[0],C[1],C[2],C[3]];return o.map(q=>[q[0],q[1],z]);}
@@ -268,9 +282,10 @@ SHAPES.r2r={g:'trans',th:'เหลี่ยม → กลม (Square / Rect to 
   params:[{k:'A',l:'ด้านเหลี่ยม X (A)',u:'มม.',def:800},{k:'B',l:'ด้านเหลี่ยม Y (B)',u:'มม.',def:600},{k:'D',l:'D วงกลม',u:'มม.',def:500},{k:'H',l:'ความสูง H',u:'มม.',def:500},
     {k:'ex',l:'เยื้องศูนย์ X',u:'มม.',def:0},{k:'ey',l:'เยื้องศูนย์ Y',u:'มม.',def:0},{k:'basis',l:'ขนาดที่ระบุคือ',type:'sel',opts:BASIS,def:'ID'},
     {k:'n',l:'แบ่งเป็น (ตะเข็บกลางด้าน)',type:'sel',opts:[[1,'1 ชิ้น'],[2,'2 ชิ้น'],[4,'4 ชิ้น']],def:1},{k:'mk',l:'เส้นพับต่อมุม (มาร์ก)',u:'เส้น',def:4,min:1,step:1},{k:'lap',l:'เผื่อตะเข็บ/ทับ',u:'มม.',def:0}],
-  build(p,G){const t=G.t,a=mean(p.A,p.basis,t)/2,b=mean(p.B,p.basis,t)/2,r=mean(p.D,p.basis,t)/2,mk=Math.max(1,Math.round(p.mk));
-    let q=Math.max(12,arcN(r,PI/2));q=Math.ceil(q/mk)*mk;
-    const P=rectPath(a,b,0,0,0),Q=[];for(let k=0;k<=4*q;k++){const f=-PI/2+k*PI/2/q;Q.push([+p.ex+r*Math.cos(f),+p.ey+r*Math.sin(f),+p.H]);}
+  build(p,G){const t=G.t,ca=Math.cos(Math.atan2(Math.abs(p.A-p.D)/2,p.H)),cb=Math.cos(Math.atan2(Math.abs(p.B-p.D)/2,p.H));
+    const a=meanS(p.A,p.basis,t,ca)/2,b=meanS(p.B,p.basis,t,cb)/2,r=meanS(p.D,p.basis,t,(ca+cb)/2)/2,mk=Math.max(1,Math.round(p.mk));
+    let q=Math.max(12,arcN(r,PI/2));q=Math.ceil(q/mk)*mk;const dl=PI/4/q,rc=r*dl/Math.sin(dl); // chord-compensated radius → true π·D
+    const P=rectPath(a,b,0,0,0),Q=[];for(let k=0;k<=4*q;k++){const f=-PI/2+k*PI/2/q;Q.push([+p.ex+rc*Math.cos(f),+p.ey+rc*Math.sin(f),+p.H]);}
     const steps=['B'];for(let c=0;c<4;c++){for(let k=0;k<q;k++)steps.push('T');steps.push('B');if(c<3)steps.push('B');}
     const n=+p.n,cuts=n===2?[[4,2*q]]:n===4?[[2,q],[4,2*q],[6,3*q]]:[];
     let i0=0,j0=0;const parts=splitStrip(P,Q,steps,cuts);
@@ -278,7 +293,6 @@ SHAPES.r2r={g:'trans',th:'เหลี่ยม → กลม (Square / Rect to 
       U.lines.forEach((l,k)=>{const gi=i0+l[2],gj=j0+l[3];if(gi%2===1&&(gj%q===0)){bends.push({a:l[0],b:l[1],txt:'พับ',kind:'bend'});}else if(gi%2===1&&gj%(q/mk)===0)idx.push(k);});
       i0+=pt.P.length-1;j0+=pt.Q.length-1;return {name:n>1?`Transition ${ix+1}/${n}`:'Transition',qty:1,...stripPiece(U,{lap:p.lap,markIdx:idx,bends})};});
     const warn=[];if(r>Math.min(a,b)+1e-6&&r<Math.max(a,b))warn.push('วงกลมใหญ่กว่าด้านแคบ — ตรวจรูปทรงอีกครั้ง');
-    const ed=k=>d3(P[k],Q[0]);void ed;
     return {pieces,tris:stripTris(P,Q,steps),warn,info:[['ขนาดกลางเนื้อ เหลี่ยม',fmt1(2*a)+' × '+fmt1(2*b)+' มม.'],['D กลางเนื้อ',fmt1(2*r)+' มม.'],
       ['เส้นรอบวงคลี่ (วงกลม)',fmt1(2*PI*r)+' มม.'],['ความยาวขอบเหลี่ยมรวม',fmt1(4*(a+b))+' มม.'],['ความสูงจริงที่มุม (True length)',fmt1(d3(P[1],Q[0]))+' – '+fmt1(d3(P[1],Q[q]))+' มม.']]};}};
 /* ---------- rectangle → rectangle (hopper / pyramid frustum) ---------- */
@@ -286,10 +300,11 @@ SHAPES.rr={g:'trans',th:'เหลี่ยม → เหลี่ยม (Hopper
   params:[{k:'A1',l:'ล่าง X (A1)',u:'มม.',def:1000},{k:'B1',l:'ล่าง Y (B1)',u:'มม.',def:800},{k:'A2',l:'บน X (A2)',u:'มม.',def:400},{k:'B2',l:'บน Y (B2)',u:'มม.',def:300},
     {k:'H',l:'ความสูง H',u:'มม.',def:600},{k:'ex',l:'เยื้องศูนย์ X',u:'มม.',def:0},{k:'ey',l:'เยื้องศูนย์ Y',u:'มม.',def:0},{k:'basis',l:'ขนาดที่ระบุคือ',type:'sel',opts:BASIS,def:'ID'},
     {k:'seam',l:'ตะเข็บ',type:'sel',opts:[['mid1','กลางด้าน — 1 ชิ้น'],['mid2','กลางด้าน — 2 ชิ้น'],['mid4','กลางด้าน — 4 ชิ้น (มีพับ)'],['corner','ที่มุม — แผ่นเรียบ 4 แผ่น']],def:'mid1'},{k:'lap',l:'เผื่อตะเข็บ/ทับ',u:'มม.',def:0}],
-  build(p,G){const t=G.t,a1=mean(p.A1,p.basis,t)/2,b1=mean(p.B1,p.basis,t)/2,a2=mean(p.A2,p.basis,t)/2,b2=mean(p.B2,p.basis,t)/2,cor=p.seam==='corner';
+  build(p,G){const t=G.t,ca=Math.cos(Math.atan2(Math.abs(p.A1-p.A2)/2,p.H)),cb=Math.cos(Math.atan2(Math.abs(p.B1-p.B2)/2,p.H));
+    const a1=meanS(p.A1,p.basis,t,ca)/2,b1=meanS(p.B1,p.basis,t,cb)/2,a2=meanS(p.A2,p.basis,t,ca)/2,b2=meanS(p.B2,p.basis,t,cb)/2,cor=p.seam==='corner';
     const P=rectPath(a1,b1,0,0,0,!cor),Q=rectPath(a2,b2,+p.ex,+p.ey,+p.H,!cor),steps=pairSteps(P,Q);
     const cuts=cor?[[1,1],[2,2],[3,3]]:p.seam==='mid2'?[[4,4]]:p.seam==='mid4'?[[2,2],[4,4],[6,6]]:[];const parts=splitStrip(P,Q,steps,cuts);let i0=0;
-    const SN=['หน้า (−Y)','ขวา (+X)','หลัง (+Y)','ซ้าย (−X)'];
+    const SN=['-Y (หน้า)','+X (ขวา)','+Y (หลัง)','-X (ซ้าย)'];
     const pieces=parts.map((pt,ix)=>{const U=unfoldStrip(pt.P,pt.Q,pt.steps),bends=[];if(!cor)U.lines.forEach(l=>{const gi=i0+l[2];if(l[2]===l[3]&&gi%2===1)bends.push({a:l[0],b:l[1],txt:'พับ',kind:'bend'});});
       i0+=pt.P.length-1;return {name:cor?`Panel ${SN[ix]}`:parts.length>1?`Hopper ${ix+1}/${parts.length}`:'Hopper',qty:1,...stripPiece(U,{lap:p.lap,bends})};});
     const sl=(da,h)=>Math.hypot(da,h);
@@ -303,7 +318,7 @@ SHAPES.delbow={g:'duct',th:'ข้องอท่อลมเหลี่ยม 
   build(p,G){const t=G.t,Ri=+p.Ri,Ro=Ri+ +p.W,A=p.A*D2R,ext=+p.ext,lk=+p.lk,H=+p.Hd;
     const tv=a=>[-Math.sin(a),Math.cos(a)],pt=(R,a)=>[R*Math.cos(a),R*Math.sin(a)],ad=(q,v,k)=>[q[0]+v[0]*k,q[1]+v[1]*k];
     const ri=Ri-lk,ro=Ro+lk;const ch=[ad(pt(ri,0),[0,-1],ext),ad(pt(ro,0),[0,-1],ext),...arc2(0,0,ro,0,A),ad(pt(ro,A),tv(A),ext),ad(pt(ri,A),tv(A),ext),...arc2(0,0,Math.max(ri,0.001),A,0)];
-    const bends=lk>0?[...[[Ri,'พับขอบ'],[Ro,'พับขอบ']].map(([R,txt])=>({a:pt(R,0),b:pt(R,A),txt,kind:'bend',arc:arc2(0,0,R,0,A)}))]:[];
+    const bends=lk>0?[[Ri,'พับขอบ'],[Ro,'พับขอบ']].map(([R,txt])=>({a:pt(R,A/2-1e-3),b:pt(R,A/2+1e-3),txt,kind:'bend',arc:[ad(pt(R,0),[0,-1],ext),...arc2(0,0,R,0,A),ad(pt(R,A),tv(A),ext)]})):[];
     const cheek={name:'Cheek (แก้มข้าง)',qty:2,outline:ch,holes:[],marks:[{a:pt(ri,0),b:pt(ro,0)},{a:pt(ri,A),b:pt(ro,A)}],bends,seams:[]};
     const wrap=(R,nm)=>{const L=R*A;return {name:nm,qty:1,outline:[[0,0],[L+2*ext,0],[L+2*ext,H],[0,H]],holes:[],marks:[{a:[ext,0],b:[ext,H],txt:'เริ่มม้วน'},{a:[ext+L,0],b:[ext+L,H],txt:'สิ้นสุดม้วน'}],bends:[],seams:[]};};
     const pieces=[cheek,wrap(Ri-t/2,'Throat wrapper (แผ่นโค้งใน)'),wrap(Ro+t/2,'Heel wrapper (แผ่นโค้งนอก)')];
@@ -312,18 +327,26 @@ SHAPES.delbow={g:'duct',th:'ข้องอท่อลมเหลี่ยม 
     for(const R of [Ri,Ro]){const rows=[];for(let k=0;k<=M;k++){const a=A*k/M;rows.push([P3(R,a,0),P3(R,a,H)]);}tris.push(...tri3(rows));}
     if(ext>0)for(const a of [0,A]){const s=a===0?-1:1,v=[...tv(a),0];const q=(R,z)=>vadd(P3(R,a,z),vmul(v,s*ext));
       tris.push([P3(Ri,a,0),P3(Ro,a,0),q(Ro,0)],[P3(Ri,a,0),q(Ro,0),q(Ri,0)],[P3(Ri,a,H),P3(Ro,a,H),q(Ro,H)],[P3(Ri,a,H),q(Ro,H),q(Ri,H)],[P3(Ri,a,0),P3(Ri,a,H),q(Ri,H)],[P3(Ri,a,0),q(Ri,H),q(Ri,0)],[P3(Ro,a,0),P3(Ro,a,H),q(Ro,H)],[P3(Ro,a,0),q(Ro,H),q(Ro,0)]);}
-    const warn=[];if(Ri<p.W*0.5)warn.push('รัศมีด้านในน้อยกว่า ½W — ลมไหลไม่ดี (SMACNA แนะนำ R/W ≥ 1.0 หรือใส่ใบนำลม)');
+    const warn=[];if(lk>0&&Ri-lk<=0)warn.push('เผื่อพับขอบมากกว่ารัศมีด้านใน — แก้มด้านในจะทับกัน');if(Ri<p.W*0.5)warn.push('รัศมีด้านในน้อยกว่า ½W — ลมไหลไม่ดี (SMACNA แนะนำ R/W ≥ 1.0 หรือใส่ใบนำลม)');
     return {pieces,tris,warn,info:[['รัศมีโค้งกลาง / R/W',fmt1((Ri+Ro)/2)+' มม. / '+fmt((Ri+Ro)/2/p.W,2)],['ความยาวแผ่นโค้งใน (คลี่)',fmt1((Ri-t/2)*A+2*ext)+' มม.'],['ความยาวแผ่นโค้งนอก (คลี่)',fmt1((Ro+t/2)*A+2*ext)+' มม.']]};}};
 /* ---------- press-brake profile (channel / angle / Z / hat …) ---------- */
-function bendCalc(legs,angs,r,t,K,basis){const B=angs.map(a=>{const ar=Math.abs(a)*D2R;return {ar,deg:Math.abs(a),up:a>=0,BA:ar*(r+K*t),SB:basis==='in'?Math.tan(ar/2)*r:Math.tan(ar/2)*(r+t)};});
+/* K-factor: manual (>0) · material table · DIN 6935 from r/t (k = 0.65 + 0.5·log10(r/t), K = k/2) */
+function kFactor(p,G){if(+p.K>0)return {K:+p.K,src:'กำหนดเอง'};
+  if(p.kmode==='din'){const rt=Math.max(1e-3,+p.r)/G.t,k=rt>5?1:0.65+0.5*Math.log10(rt);return {K:Math.min(0.5,Math.max(0.25,k/2)),src:`DIN 6935 (r/t = ${fmt(rt,2)})`};}
+  return {K:MATS[G.mat].K,src:'ตามวัสดุ'};}
+const KMODE={k:'kmode',l:'K-factor อัตโนมัติจาก',type:'sel',opts:[['mat','ตารางวัสดุ'],['din','DIN 6935 (ตาม r/t)']],def:'mat'};
+function bendCalc(legs,angs,r,t,K,basis){const B=angs.map(a=>{const ar=Math.abs(a)*D2R;const hem=Math.abs(a)>=179.5;return {ar,deg:Math.abs(a),up:a>=0,hem,BA:ar*(r+K*t),SB:hem?(basis==='in'?r:r+t):basis==='in'?Math.tan(ar/2)*r:Math.tan(ar/2)*(r+t)};});
   const flats=legs.map((L,i)=>L-(i>0&&B[i-1]?B[i-1].SB:0)-(B[i]?B[i].SB:0));const total=flats.reduce((s,v)=>s+v,0)+B.reduce((s,b)=>s+b.BA,0);return {B,flats,total};}
 SHAPES.profile={g:'bend',th:'รางพับ / แผ่นพับหลายขั้น (Profile)',en:'Bent profile',icon:'prof',
   params:[{k:'legs',l:'ความยาวขา (คั่นด้วย ,)',type:'text',def:'50,100,50'},{k:'angs',l:'มุมพับ (+ขึ้น / −ลง)',type:'text',def:'90,90'},{k:'Lz',l:'ความยาวราง',u:'มม.',def:1000},
-    {k:'r',l:'รัศมีพับด้านใน r',u:'มม.',def:3},{k:'K',l:'K-factor',u:'',def:0,step:0.01,hint:'0 = ใช้ค่าตามวัสดุ'},{k:'basis',l:'ขนาดขาที่ระบุ',type:'sel',opts:[['out','ขนาดนอก (Outside)'],['in','ขนาดใน (Inside)']],def:'out'}],
+    {k:'r',l:'รัศมีพับด้านใน r',u:'มม.',def:3},{k:'K',l:'K-factor',u:'',def:0,step:0.01,hint:'0 = อัตโนมัติ (ตามตัวเลือกด้านล่าง)'},KMODE,{k:'basis',l:'ขนาดขาที่ระบุ',type:'sel',opts:[['out','ขนาดนอก (Outside)'],['in','ขนาดใน (Inside)']],def:'out'}],
   presets:[['รางตัว U',p=>({legs:'50,100,50',angs:'90,90'})],['เหล็กฉาก L',p=>({legs:'50,50',angs:'90'})],['ตัว Z',p=>({legs:'40,80,40',angs:'90,-90'})],['หมวก (Hat)',p=>({legs:'25,40,60,40,25',angs:'-90,90,90,-90'})]],
-  build(p,G){const t=G.t,K=+p.K||MATS[G.mat].K,legs=String(p.legs).split(/[,\s]+/).filter(Boolean).map(Number),angs=String(p.angs).split(/[,\s]+/).filter(Boolean).map(Number),warn=[];
+  build(p,G){const t=G.t,KF=kFactor(p,G),K=KF.K,warn=[],num=s=>String(s).split(/[,\s]+/).filter(Boolean).map(Number);let legs=num(p.legs),angs=num(p.angs);
+    if(legs.some(v=>!isFinite(v)||v<=0)||angs.some(v=>!isFinite(v)||v===0||Math.abs(v)>180)){warn.push('มีค่าขา/มุมที่ไม่ถูกต้อง — ขาต้อง > 0, มุม 0 < |มุม| ≤ 180 (ข้ามค่าที่ผิด)');legs=legs.filter(v=>isFinite(v)&&v>0);angs=angs.filter(v=>isFinite(v)&&v!==0&&Math.abs(v)<=180);}
+    if(legs.length<1)return {pieces:[],tris:[],warn:warn.concat('ต้องมีความยาวขาอย่างน้อย 1 ค่า'),info:[]};
     if(angs.length!==legs.length-1)warn.push(`จำนวนมุมพับต้อง = จำนวนขา − 1 (ขา ${legs.length} → มุม ${legs.length-1})`);
     const nb=Math.min(angs.length,legs.length-1),L=legs.slice(0,nb+1),Ag=angs.slice(0,nb);const R=bendCalc(L,Ag,+p.r,t,K,p.basis);
+    R.B.forEach((b,i)=>{if(b.hem)warn.push(`B${i+1} พับ 180° (Hem) — ขาที่ติดกันวัดถึงขอบนอกของรอยพับ`);});
     R.flats.forEach((f,i)=>{if(f<=0)warn.push(`ขา ${i+1} สั้นเกินรัศมีพับ`);else if(f<3*t)warn.push(`ขา ${i+1} ช่วงเรียบ ${fmt1(f)} มม. — สั้นกว่า ~3t อาจพับไม่ได้กับแม่พิมพ์ทั่วไป`);});
     let x=0;const bends=[],marks=[],tab=[];const Lz=+p.Lz;
     for(let i=0;i<=nb;i++){x+=R.flats[i];if(i<nb){const b=R.B[i],c=x+b.BA/2;marks.push({a:[x,0],b:[x,Lz]},{a:[x+b.BA,0],b:[x+b.BA,Lz]});bends.push({a:[c,0],b:[c,Lz],txt:`B${i+1} ${b.up?'ขึ้น':'ลง'} ${fmt(b.deg)}° R${fmt1(+p.r)}`,kind:'bend'});tab.push([`B${i+1}`,fmt1(c)]);x+=b.BA;}}
@@ -332,27 +355,39 @@ SHAPES.profile={g:'bend',th:'รางพับ / แผ่นพับหลา
     for(let i=0;i<=nb;i++){cx+=R.flats[i]*Math.cos(h);cy+=R.flats[i]*Math.sin(h);pts.push([cx,cy]);if(i<nb){const b=R.B[i],s=b.up?1:-1,oc=[cx-s*rn*Math.sin(h),cy+s*rn*Math.cos(h)];const n=Math.max(6,Math.ceil(b.deg/6));
       for(let k=1;k<=n;k++){const a=h+s*b.ar*k/n;const q=[oc[0]+s*rn*Math.sin(a),oc[1]-s*rn*Math.cos(a)];pts.push(q);}h+=s*b.ar;cx=pts.at(-1)[0];cy=pts.at(-1)[1];}}
     const rows=pts.map(q=>[[q[0],0,q[1]],[q[0],Lz,q[1]]]);const tris=tri3(rows);
-    return {pieces,tris,warn,info:[['K-factor ที่ใช้',fmt(K,2)],['ความยาวแผ่นคลี่รวม',fmt(R.total,1)+' มม.'],...R.B.map((b,i)=>[`B${i+1}: BA / Setback`,fmt(b.BA,2)+' / '+fmt(b.SB,2)+' มม.']),
+    return {pieces,tris,warn,info:[['K-factor ที่ใช้',fmt(K,3)+' · '+KF.src],['ความยาวแผ่นคลี่รวม',fmt(R.total,1)+' มม.'],...R.B.map((b,i)=>[`B${i+1}: BA / Setback`,fmt(b.BA,2)+' / '+fmt(b.SB,2)+' มม.']),
       ...tab.map(([k,v])=>[`ตำแหน่งเส้นพับ ${k} (จากขอบซ้าย)`,v+' มม.'])]};}};
 /* ---------- tray / box (4-side or 2-side flanges) ---------- */
 SHAPES.tray={g:'bend',th:'ถาด / กล่องพับ (Tray)',en:'Tray',icon:'tray',
   params:[{k:'L',l:'ความยาว L (นอก)',u:'มม.',def:600},{k:'W',l:'ความกว้าง W (นอก)',u:'มม.',def:400},{k:'H',l:'ความสูงขอบ H (นอก)',u:'มม.',def:80},
-    {k:'sides',l:'พับขอบ',type:'sel',opts:[['4','4 ด้าน'],['2','2 ด้าน (ด้านยาว)']],def:'4'},{k:'r',l:'รัศมีพับด้านใน r',u:'มม.',def:2},{k:'K',l:'K-factor',u:'',def:0,step:0.01,hint:'0 = ใช้ค่าตามวัสดุ'},{k:'rel',l:'รูกันฉีกที่มุม Ø',u:'มม.',def:0}],
-  build(p,G){const t=G.t,K=+p.K||MATS[G.mat].K,r=+p.r,BA=PI/2*(r+K*t),SB=r+t,Hf=p.H-SB,four=p.sides==='4',warn=[];if(Hf<=0)warn.push('ความสูงขอบน้อยกว่ารัศมีพับ + t');
+    {k:'sides',l:'พับขอบ',type:'sel',opts:[['4','4 ด้าน'],['2','2 ด้าน (ด้านยาว)']],def:'4'},{k:'r',l:'รัศมีพับด้านใน r',u:'มม.',def:2},{k:'K',l:'K-factor',u:'',def:0,step:0.01,hint:'0 = อัตโนมัติ (ตามตัวเลือกด้านล่าง)'},KMODE,{k:'rel',l:'รูกันฉีกที่มุม Ø',u:'มม.',def:0}],
+  build(p,G){const t=G.t,KF=kFactor(p,G),K=KF.K,r=+p.r,BA=PI/2*(r+K*t),SB=r+t,Hf=p.H-SB,four=p.sides==='4',warn=[];if(Hf<=0)warn.push('ความสูงขอบน้อยกว่ารัศมีพับ + t');
     const Lb=four?p.L-2*SB:+p.L,Wb=p.W-2*SB,e=BA+Hf,X=Lb/2,Y=Wb/2;let ol;
     if(four)ol=[[-X,-Y-e],[X,-Y-e],[X,-Y],[X+e,-Y],[X+e,Y],[X,Y],[X,Y+e],[-X,Y+e],[-X,Y],[-X-e,Y],[-X-e,-Y],[-X,-Y]];else ol=[[-X,-Y-e],[X,-Y-e],[X,Y+e],[-X,Y+e]];
     const bends=[{a:[-X,-Y-BA/2],b:[X,-Y-BA/2]},{a:[-X,Y+BA/2],b:[X,Y+BA/2]},...(four?[{a:[X+BA/2,-Y],b:[X+BA/2,Y]},{a:[-X-BA/2,-Y],b:[-X-BA/2,Y]}]:[])].map(b=>({...b,txt:`ขึ้น 90° R${fmt1(r)}`,kind:'bend'}));
     const marks=[{a:[-X,-Y],b:[X,-Y]},{a:[-X,-Y-BA],b:[X,-Y-BA]},{a:[-X,Y],b:[X,Y]},{a:[-X,Y+BA],b:[X,Y+BA]},...(four?[{a:[X,-Y],b:[X,Y]},{a:[X+BA,-Y],b:[X+BA,Y]},{a:[-X,-Y],b:[-X,Y]},{a:[-X-BA,-Y],b:[-X-BA,Y]}]:[])];
-    const holes=four&&p.rel>0?[[X,-Y],[X,Y],[-X,Y],[-X,-Y]].map(c=>arc2(c[0],c[1],p.rel/2,0,2*PI).slice(0,-1)):[];
+    /* corner relief: 270° arc cut into the outline at each notch corner (one closed cut path, correct area) */
+    const rr=Math.min(p.rel/2,0.95*Math.min(e,X,Y));if(four&&rr>0){const o=[];for(let i=0;i<ol.length;i++){const c=ol[i],pv=ol[(i+ol.length-1)%ol.length];
+        if(Math.abs(Math.abs(c[0])-X)<1e-9&&Math.abs(Math.abs(c[1])-Y)<1e-9){const a0=Math.atan2(pv[1]-c[1],pv[0]-c[0]);o.push(...arc2(c[0],c[1],rr,a0,a0-1.5*PI));}else o.push(c);}ol=o;}
+    const holes=[];
     const pieces=[{name:'Tray blank (แผ่นตัดก่อนพับ)',qty:1,outline:ol,holes,marks,bends,seams:[]}];
     /* 3D */const tris=[],Lo=+p.L,Wo=+p.W,Ho=+p.H,q=(x0,y0,x1,y1,z0,z1,ax)=>ax==='z'?[[[x0,y0,z0],[x1,y0,z0],[x1,y1,z0]],[[x0,y0,z0],[x1,y1,z0],[x0,y1,z0]]]:ax==='x'?[[[x0,y0,z0],[x0,y1,z0],[x0,y1,z1]],[[x0,y0,z0],[x0,y1,z1],[x0,y0,z1]]]:[[[x0,y0,z0],[x1,y0,z0],[x1,y0,z1]],[[x0,y0,z0],[x1,y0,z1],[x0,y0,z1]]];
     tris.push(...q(-Lo/2,-Wo/2,Lo/2,Wo/2,0,0,'z'),...q(-Lo/2,-Wo/2,Lo/2,-Wo/2,0,Ho,'y'),...q(-Lo/2,Wo/2,Lo/2,Wo/2,0,Ho,'y'));if(four)tris.push(...q(-Lo/2,-Wo/2,-Lo/2,Wo/2,0,Ho,'x'),...q(Lo/2,-Wo/2,Lo/2,Wo/2,0,Ho,'x'));
     if(four&&!(p.rel>0))warn.push('มุมแบบบากเหลี่ยม — ถ้าเหล็กหนา/มุมฉีก ใส่รูกันฉีก Ø ≈ 2t ขึ้นไป');
-    return {pieces,tris,warn,info:[['K-factor ที่ใช้',fmt(K,2)],['Bend allowance (90°)',fmt(BA,2)+' มม.'],['ช่วงเรียบขอบ',fmt1(Hf)+' มม.'],['ขนาดแผ่นตัดรวม',fmt1(Lb+(four?2*e:0))+' × '+fmt1(Wb+2*e)+' มม.']]};}};
+    return {pieces,tris,warn,info:[['K-factor ที่ใช้',fmt(K,3)+' · '+KF.src],['Bend allowance (90°)',fmt(BA,2)+' มม.'],['ช่วงเรียบขอบ',fmt1(Hf)+' มม.'],['ขนาดแผ่นตัดรวม',fmt1(Lb+(four?2*e:0))+' × '+fmt1(Wb+2*e)+' มม.']]};}};
 const GROUPS=[['round','งานกลม / ท่อลมกลม'],['trans','งานแปลงหน้าตัด'],['duct','ท่อลมเหลี่ยม'],['bend','งานพับ']];
 /* run a shape → normalised pieces with area/weight */
+const ZERO_OK=new Set(['ex','ey','e','xm','lap','ext','lk','rel','D2','r','K']); // may be 0 (offsets may also be negative)
+const NEG_OK=new Set(['ex','ey','e']);
+function checkParams(sh,p,G){const bad=[];if(!(G.t>0))bad.push('ความหนา t ต้องมากกว่า 0');
+  for(const d of sh.params){if(d.type==='sel'||d.type==='text')continue;const v=p[d.k];
+    if(!isFinite(v)){bad.push(`${d.l}: ต้องเป็นตัวเลข`);continue;}
+    if(NEG_OK.has(d.k))continue;if(ZERO_OK.has(d.k)?v<0:v<=0)bad.push(`${d.l}: ต้อง${ZERO_OK.has(d.k)?'ไม่ติดลบ':'มากกว่า 0'}`);
+    else if(d.u==='°'&&v>180)bad.push(`${d.l}: ต้องไม่เกิน 180°`);}
+  return bad;}
 function runShape(S){const sh=SHAPES[S.shape],G={t:+S.t,mat:S.mat};const p={};for(const d of sh.params)p[d.k]=S.p[S.shape]?.[d.k]??d.def;
-  for(const d of sh.params)if(d.type!=='sel'&&d.type!=='text')p[d.k]=+p[d.k];
+  for(const d of sh.params)if(d.type!=='sel'&&d.type!=='text')p[d.k]=p[d.k]===''?NaN:+p[d.k];
+  const bad=checkParams(sh,p,G);if(bad.length)return {pieces:[],tris:[],warn:bad.map(b=>'ค่าไม่ถูกต้อง — '+b),info:[],p};
   let R;try{R=sh.build(p,G);}catch(e){console.error(e);return {pieces:[],tris:[],warn:['คำนวณไม่สำเร็จ: '+e.message],info:[]};}
   R.warn=R.warn||[];const M=MATS[S.mat],sheet=SHEETS[S.sheet]||[1219,2438];
   R.pieces.forEach((pc,i)=>{pc.id='P'+(i+1);normPiece(pc);if(S.rotFit)fitRotate(pc),normPiece(pc);const A=polyArea(pc.outline)-(pc.holes||[]).reduce((s,h)=>s+polyArea(h),0);pc.area=A;pc.kg=A*G.t*M.rho*1e-9;
@@ -402,24 +437,40 @@ function buildMat(){$('#mat').innerHTML=Object.entries(MATS).map(([k,m])=>`<opti
   $$('#tchips button').forEach(b=>b.onclick=()=>{S.t=+b.dataset.t;$('#t').value=S.t;buildMat();update();});
   $('#mat').onchange=e=>{S.mat=e.target.value;update();};$('#t').onchange=e=>{S.t=Math.max(0.1,+e.target.value||1);buildMat();update();};
   $('#sheet').onchange=e=>{S.sheet=e.target.value;update();};$('#rotFit').onchange=e=>{S.rotFit=+e.target.value;update(true);};
-  $('#ov').onchange=e=>{S.pdf.ov=Math.max(5,+e.target.value||10);update();};$('#mg').onchange=e=>{S.pdf.mg=Math.max(4,+e.target.value||8);update();};$('#ovw').onchange=e=>{S.pdf.ovw=+e.target.value;save();};}
+  $('#ov').onchange=e=>{S.pdf.ov=Math.min(60,Math.max(5,+e.target.value||10));e.target.value=S.pdf.ov;update();};$('#mg').onchange=e=>{S.pdf.mg=Math.min(30,Math.max(4,+e.target.value||8));e.target.value=S.pdf.mg;update();};$('#ovw').onchange=e=>{S.pdf.ovw=+e.target.value;update();};}
 /* ---------- tiling for true-scale printing ---------- */
 const HB=7; // header / footer band inside the margin (mm)
-function tilePlan(pc){const m=S.pdf.mg,ov=S.pdf.ov;const o=[[420,297],[297,420]].map(([PW,PH])=>{const w=PW-2*m,h=PH-2*m-2*HB,sx=w-ov,sy=h-ov;
-  const cols=pc.w<=w?1:Math.ceil((pc.w-ov)/sx),rows=pc.h<=h?1:Math.ceil((pc.h-ov)/sy);return {PW,PH,w,h,sx,sy,cols,rows,n:cols*rows,land:PW>PH};});
-  const T=o[1].n<o[0].n?o[1]:o[0];T.pages=[];const segs=[];const add=(pts,cl)=>{const P=cl?[...pts,pts[0]]:pts;for(let i=1;i<P.length;i++)segs.push([P[i-1][0],pc.h-P[i-1][1],P[i][0],pc.h-P[i][1]]);};
+function pip(q,poly){let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>q[1])!==(b[1]>q[1])&&q[0]<(b[0]-a[0])*(q[1]-a[1])/(b[1]-a[1])+a[0])c=!c;}return c;}
+/* A3 tiling: keeps every page that carries a line OR lies inside the part (so the paper template stays one rigid piece) */
+function tilePlan(pc){const m=S.pdf.mg,ov=S.pdf.ov,key=m+'|'+ov;if(pc._tp&&pc._tp.key===key)return pc._tp;
+  const segs=[];const add=(pts,cl)=>{const P=cl?[...pts,pts[0]]:pts;for(let i=1;i<P.length;i++)segs.push([P[i-1][0],pc.h-P[i-1][1],P[i][0],pc.h-P[i][1]]);};
   add(pc.outline,true);(pc.holes||[]).forEach(h=>add(h,true));(pc.bends||[]).forEach(b=>add(b.arc||[b.a,b.b]));(pc.marks||[]).forEach(m=>add([m.a,m.b]));
-  for(let r=0;r<T.rows;r++)for(let k=0;k<T.cols;k++){const gx=k*T.sx,gy=r*T.sy;if(segs.some(q=>clipSeg(q[0]-gx,q[1]-gy,q[2]-gx,q[3]-gy,T.w,T.h)))T.pages.push([r,k]);}
-  T.all=T.n;T.n=T.pages.length;return T;}
+  const inside=(x,y)=>{const q=[x,pc.h-y];return pip(q,pc.outline)&&!(pc.holes||[]).some(h=>pip(q,h));};
+  const o=[[420,297],[297,420]].map(([PW,PH])=>{const w=PW-2*m,h=PH-2*m-2*HB,sx=w-ov,sy=h-ov;
+    const cols=pc.w<=w?1:Math.ceil((pc.w-ov)/sx),rows=pc.h<=h?1:Math.ceil((pc.h-ov)/sy),T={PW,PH,w,h,sx,sy,cols,rows,land:PW>PH,pages:[],all:cols*rows};
+    for(let r=0;r<rows;r++)for(let k=0;k<cols;k++){const gx=k*sx,gy=r*sy;if(inside(gx+w/2,gy+h/2)||segs.some(q=>clipSeg(q[0]-gx,q[1]-gy,q[2]-gx,q[3]-gy,w,h)))T.pages.push([r,k]);}
+    T.n=T.pages.length;return T;});
+  const T=o[1].n<o[0].n||(o[1].n===o[0].n&&o[1].all<o[0].all)?o[1]:o[0];T.key=key;pc._tp=T;return T;}
 const rowL=r=>String.fromCharCode(65+r%26)+(r>=26?Math.floor(r/26):'');
 /* ---------- results panel ---------- */
 function update(refit){save();R=runShape(S);
   $('#warns').innerHTML=R.warn.map(w=>`<div class="warn">${esc(w)}</div>`).join('');
   let tk=0,tp=0;const rows=R.pieces.map(pc=>{const T=tilePlan(pc);tk+=pc.kg*pc.qty;tp+=T.n;return `<tr><td><b>${pc.id}</b></td><td>${esc(pc.name)}</td><td class="n">×${pc.qty}</td><td class="n">${fmt(pc.w)}×${fmt(pc.h)}</td><td class="n">${fmt(pc.kg*pc.qty,2)}</td><td class="n">${T.n}</td></tr>`;}).join('');
   $('#ptab').innerHTML=`<tr><th>ชิ้น</th><th>ชื่อ</th><th>จำนวน</th><th>ขนาดคลี่ (มม.)</th><th>kg รวม</th><th>A3</th></tr>`+rows+`<tr><td></td><td><b>รวม</b></td><td></td><td></td><td class="n"><b>${fmt(tk,2)}</b></td><td class="n"><b>${tp}</b></td></tr>`;
-  $('#itab').innerHTML=R.info.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${esc(v)}</td></tr>`).join('')+`<tr><td>ความหนา / วัสดุ</td><td class="n">${S.t} มม. · ${esc(S.mat)}</td></tr>`;
-  $('#status').innerHTML=`<span>${esc(SHAPES[S.shape].th)}</span><span>ชิ้นแบบ <b>${R.pieces.length}</b></span><span>น้ำหนักรวม <b>${fmt(tk,2)}</b> kg</span><span>PDF ขนาดจริง <b>${tp}</b> หน้า A3${S.pdf.ovw?' + ภาพรวม 1':''}</span><span class="sp"></span><span>หน่วย มม.</span>`;
-  draw3d(refit!==false);if(VIEW==='2d'){if(refit)fit2();draw2();}}
+  const NS=nestEstimate(R.pieces);
+  $('#ordw').innerHTML=R.ord?`<h3>${esc(R.ord.title)}</h3><table class="t"><tr>${R.ord.head.filter(Boolean).map((h,i)=>`<th${i?' style="text-align:right"':''}>${esc(h)}</th>`).join('')}</tr>${R.ord.rows.map(r=>`<tr>${r.slice(0,R.ord.head.filter(Boolean).length).map((v,i)=>`<td class="${i?'n':''}">${esc(v)}</td>`).join('')}</tr>`).join('')}</table>`:'';
+  $('#itab').innerHTML=(NS?`<tr><td>ใช้แผ่น ${esc(S.sheet.replace('x',' × '))} (ประมาณ)</td><td class="n">${NS.sheets} แผ่น · ใช้เนื้อ ${fmt(NS.util*100)}%</td></tr>`:'')+R.info.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${esc(v)}</td></tr>`).join('')+`<tr><td>ความหนา / วัสดุ</td><td class="n">${S.t} มม. · ${esc(S.mat)}</td></tr>`;
+  $('#status').innerHTML=`<span>${esc(SHAPES[S.shape].th)}</span><span>ชิ้นแบบ <b>${R.pieces.length}</b></span><span>น้ำหนักรวม <b>${fmt(tk,2)}</b> kg</span><span>PDF ขนาดจริง <b>${tp}</b> หน้า A3${S.pdf.ovw?` + ภาพรวม ${R.ord?2:1}`:''}</span><span class="sp"></span><span>หน่วย มม.</span>`;
+  const ext=R.pieces.reduce((s,p)=>s+p.w+p.h,0),grew=update.ext&&(ext/update.ext>1.6||ext/update.ext<0.6);update.ext=ext;
+  draw3d(!!refit);if(VIEW==='2d'){if(refit||grew)fit2();draw2();}}
+/* rough sheet count: shelf-pack the bounding boxes (with qty, 10 mm gap, 90° turns allowed). Real nesting can do better. */
+function nestEstimate(pcs){const sh=SHEETS[S.sheet]||[1219,2438],SW=Math.max(...sh),SH=Math.min(...sh),g=10;let items=[];
+  for(const pc of pcs){let w=pc.w+g,h=pc.h+g;if(h>w)[w,h]=[h,w];if(w>SW+g||h>SH+g){if(h<=SW+g&&w<=SH+g)[w,h]=[h,w];else return null;}for(let i=0;i<pc.qty;i++)items.push([w,h,pc.area]);}
+  if(!items.length)return null;items.sort((a,b)=>b[1]-a[1]||b[0]-a[0]);const sheets=[];
+  for(const it of items){let placed=false;for(const s of sheets){for(const sh2 of s.shelves){if(sh2.h>=it[1]&&sh2.x+it[0]<=SW+g){sh2.x+=it[0];placed=true;break;}}
+      if(!placed&&s.y+it[1]<=SH+g){s.shelves.push({h:it[1],x:it[0]});s.y+=it[1];placed=true;}if(placed)break;}
+    if(!placed)sheets.push({y:it[1],shelves:[{h:it[1],x:it[0]}]});}
+  const area=items.reduce((s,i)=>s+i[2],0);return {sheets:sheets.length,util:area/(sheets.length*SW*SH)};}
 /* ---------- 3D ---------- */
 let R3=null;
 function init3(){if(R3||!window.THREE)return;const c=$('#gl');const r=new THREE.WebGLRenderer({canvas:c,antialias:true,preserveDrawingBuffer:true});r.setPixelRatio(Math.min(2,devicePixelRatio||1));
@@ -437,13 +488,13 @@ function draw3d(refit){init3();if(!R3)return;const g=R3.grp;while(g.children.len
   const sz=bb.getSize(new THREE.Vector3()),ctr=bb.getCenter(new THREE.Vector3()),D=Math.max(sz.x,sz.y,sz.z,10);
   const grid=new THREE.GridHelper(D*3,30,0xc9d0d6,0xdde2e6);grid.rotation.x=PI/2;grid.position.set(ctr.x,ctr.y,bb.min.z-D*0.02);g.add(grid);
   const ax=new THREE.AxesHelper(D*0.25);ax.position.set(bb.min.x-D*0.15,bb.min.y-D*0.15,bb.min.z);g.add(ax);
-  if(refit||!R3.fitted){R3.fitted=true;R3.ctr=ctr;R3.D=D;fit3();}}
+  const big=R3.D&&(D/R3.D>1.6||D/R3.D<0.6);R3.ctr=ctr;if(refit||!R3.fitted||big){R3.fitted=true;R3.D=D;fit3();}}
 function fit3(){if(!R3||!R3.ctr)return;const c=R3.ctr,D=R3.D*1.25,cam=R3.cam;cam.position.set(c.x+D*1.35,c.y-D*1.9,c.z+D*1.15);cam.near=D/200;cam.far=D*200;cam.updateProjectionMatrix();R3.ctl.target.copy(c);R3.ctl.update();}
 /* ---------- 2D flat pattern view ---------- */
 const V2={s:0.2,ox:40,oy:400,tiles:true,marks:true,dims:true};
 function layout(){let x=0;const L=[];for(const pc of R.pieces){L.push({pc,x,y:0});x+=pc.w+Math.max(200,pc.w*0.12);}return L;}
 function fit2(){const c=$('#fc'),W=c.clientWidth,H=c.clientHeight;if(!W||!R.pieces.length)return;const L=layout(),tw=L.at(-1).x+L.at(-1).pc.w,th=Math.max(...R.pieces.map(p=>p.h));
-  V2.s=Math.min((W-120)/tw,(H-150)/th);V2.ox=60+(W-120-tw*V2.s)/2;V2.oy=H-70-(H-150-th*V2.s)/2;}
+  V2.s=Math.min((W-120)/tw,(H-190)/th);V2.ox=60+(W-120-tw*V2.s)/2;V2.oy=H-70-(H-190-th*V2.s)/2;}
 function draw2(){const c=$('#fc'),W=c.clientWidth,H=c.clientHeight;if(!W)return;const dpr=Math.min(2,devicePixelRatio||1);if(c.width!==W*dpr||c.height!==H*dpr){c.width=W*dpr;c.height=H*dpr;}
   const g=c.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.fillStyle='#f2f4f6';g.fillRect(0,0,W,H);const s=V2.s;
   for(const {pc,x:ox} of layout()){const X=x=>V2.ox+(ox+x)*s,Y=y=>V2.oy-y*s;
@@ -477,7 +528,8 @@ async function exportPDF(){if(!window.jspdf)return toast('โหลด jsPDF ไ
   toast('กำลังสร้าง PDF …',60000);await new Promise(r=>setTimeout(r,30));
   try{const {jsPDF}=window.jspdf;let doc=null;const plans=R.pieces.map(pc=>({pc,T:tilePlan(pc)}));const total=plans.reduce((s,x)=>s+x.T.n,0);let pg=0;
     const addPage=(PW,PH)=>{if(!doc)doc=new jsPDF({orientation:PW>PH?'landscape':'portrait',unit:'mm',format:'a3',compress:true});else doc.addPage('a3',PW>PH?'landscape':'portrait');};
-    if(S.pdf.ovw){addPage(420,297);await document.fonts.ready;doc.addImage(overviewCanvas(plans,total).toDataURL('image/png'),'PNG',0,0,420,297,undefined,'FAST');}
+    if(S.pdf.ovw){addPage(420,297);await document.fonts.ready;doc.addImage(overviewCanvas(plans,total).toDataURL('image/png'),'PNG',0,0,420,297,undefined,'FAST');
+      if(R.ord){addPage(420,297);doc.addImage(ordCanvas().toDataURL('image/png'),'PNG',0,0,420,297,undefined,'FAST');}}
     const proj=asc(S.name)||asc(SHAPES[S.shape].en),m=S.pdf.mg,ov=S.pdf.ov;
     for(const {pc,T} of plans){for(const [r,k] of T.pages){pg++;addPage(T.PW,T.PH);const ox=m,oy=m+HB,W=T.w,H=T.h,gx0=k*T.sx,gy0=r*T.sy;
       const map=p=>[p[0]-gx0,(pc.h-p[1])-gy0];const code=`${pc.id}-${rowL(r)}${k+1}`;
@@ -528,6 +580,37 @@ function overviewCanvas(plans,total){const K=6,c=document.createElement('canvas'
     g.strokeStyle='#d9a441';g.lineWidth=0.3;g.font=F(600,Math.max(2.2,Math.min(4,T.w*s/6)),'"IBM Plex Mono",monospace');g.fillStyle='#b07d1c';
     for(const [r,k] of T.pages){g.strokeRect(X(k*T.sx),Y(r*T.sy),T.w*s,T.h*s);g.fillText(`${rowL(r)}${k+1}`,X(k*T.sx)+1,Y(r*T.sy)+3.5);}by+=bh+8;}
   g.fillStyle='#5b6671';g.font=F(400,3);g.fillText('TPE Sheet Metal — แบบคลี่ขนาดจริง',16,283);return c;}
+/* ---------- DXF (R12 ASCII, mm) for CNC laser / plasma: layers CUT · BEND · MARK · TEXT ---------- */
+function buildDXF(){const o=[],n=v=>(Math.abs(v)<1e-9?0:v).toFixed(4),W=(...a)=>{for(let i=0;i<a.length;i+=2)o.push(String(a[i]),String(a[i+1]));};
+  W(0,'SECTION',2,'HEADER',9,'$ACADVER',1,'AC1009',9,'$INSBASE',10,0,20,0,30,0,9,'$MEASUREMENT',70,1,0,'ENDSEC');
+  W(0,'SECTION',2,'TABLES',0,'TABLE',2,'LTYPE',70,3);
+  W(0,'LTYPE',2,'CONTINUOUS',70,0,3,'Solid line',72,65,73,0,40,'0.0');
+  W(0,'LTYPE',2,'DASHED',70,0,3,'__ __ __',72,65,73,2,40,'15.0',49,'10.0',49,'-5.0');
+  W(0,'LTYPE',2,'DASHDOT',70,0,3,'__ . __ .',72,65,73,4,40,'24.0',49,'14.0',49,'-4.0',49,'0.0',49,'-6.0');
+  W(0,'ENDTAB',0,'TABLE',2,'LAYER',70,4);
+  for(const [nm,col,lt] of [['CUT',7,'CONTINUOUS'],['BEND',5,'DASHDOT'],['MARK',8,'DASHED'],['TEXT',3,'CONTINUOUS']])W(0,'LAYER',2,nm,70,0,62,col,6,lt);
+  W(0,'ENDTAB',0,'ENDSEC',0,'SECTION',2,'ENTITIES');
+  const poly=(pts,ly,closed)=>{if(pts.length<2)return;W(0,'POLYLINE',8,ly,66,1,10,0,20,0,30,0,70,closed?1:0);for(const q of pts)W(0,'VERTEX',8,ly,10,n(q[0]),20,n(q[1]),30,0);W(0,'SEQEND',8,ly);};
+  const text=(x,y,h,str,ang=0)=>{str=asc(str);if(str)W(0,'TEXT',8,'TEXT',10,n(x),20,n(y),30,0,40,n(h),1,str,50,n(ang));};
+  let ox=0;for(const pc of R.pieces){const T=q=>[q[0]+ox,q[1]];
+    poly(pc.outline.map(T),'CUT',true);for(const h of pc.holes||[])poly(h.map(T),'CUT',true);
+    for(const b of pc.bends||[]){poly((b.arc||[b.a,b.b]).map(T),'BEND',false);if(b.txt){const a=T(b.a),c=T(b.b);let an=Math.atan2(c[1]-a[1],c[0]-a[0])*R2D;if(an>90)an-=180;if(an<-90)an+=180;text((a[0]+c[0])/2,(a[1]+c[1])/2+2,6,b.txt,an);}}
+    for(const m of pc.marks||[])poly([T(m.a),T(m.b)],'MARK',false);
+    const th=Math.max(8,Math.min(30,Math.min(pc.w,pc.h)/20));
+    text(ox,pc.h+th*0.8,th,`${pc.id} ${pc.name} x${pc.qty}`);text(ox,pc.h+th*0.8-th*1.5-2,th*0.6,`t=${S.t} mm ${S.mat}  ${fmt1(pc.w)} x ${fmt1(pc.h)} mm`);
+    ox+=pc.w+Math.max(50,pc.w*0.05);}
+  W(0,'ENDSEC',0,'EOF');return o.join('\r\n')+'\r\n';}
+async function exportDXF(){if(!R.pieces.length)return toast('ยังไม่มีชิ้นงาน');
+  if(await download(new Blob([buildDXF()],{type:'application/dxf'}),`${fileBase()}_flat.dxf`))toast(`สร้าง DXF ${R.pieces.length} ชิ้นแล้ว — หน่วย มม. ขนาด 1:1 (Layer CUT / BEND / MARK / TEXT)`,4500);}
+/* ---------- ordinate table page (Thai text → canvas) ---------- */
+function ordCanvas(){const K=6,c=document.createElement('canvas');c.width=420*K;c.height=297*K;const g=c.getContext('2d');g.scale(K,K);g.fillStyle='#fff';g.fillRect(0,0,420,297);
+  const F=(w,sz,f='"IBM Plex Sans Thai",sans-serif')=>`${w} ${sz}px ${f}`,O=R.ord,hd=O.head.filter(Boolean);g.strokeStyle='#15191d';g.lineWidth=0.5;g.strokeRect(10,10,400,277);
+  g.fillStyle='#15191d';g.font=F(700,6);g.fillText(S.name||SHAPES[S.shape].th,16,22);g.font=F(600,4.5);g.fillText(O.title,16,32);
+  g.font=F(400,3.4);g.fillStyle='#5b6671';g.fillText(`${SHAPES[S.shape].th} · ${MATS[S.mat].th} · หนา ${S.t} มม. · หน่วย มม. — ใช้ขีดแบบด้วยมือได้โดยไม่ต้องพิมพ์ทุกหน้า`,16,38);
+  const cw=60,x0=16;let y=50;g.font=F(600,4);g.fillStyle='#15191d';hd.forEach((h,i)=>{g.textAlign=i?'right':'left';g.fillText(h,x0+(i?cw*i+cw-6:0),y);});
+  y+=2.5;g.strokeStyle='#d3d8dd';g.beginPath();g.moveTo(x0,y);g.lineTo(x0+cw*hd.length,y);g.stroke();g.font=F(400,4,'"IBM Plex Mono",monospace');
+  for(const r of O.rows){y+=7;r.slice(0,hd.length).forEach((v,i)=>{g.textAlign=i?'right':'left';g.fillText(v,x0+(i?cw*i+cw-6:4),y);});g.beginPath();g.moveTo(x0,y+2.5);g.lineTo(x0+cw*hd.length,y+2.5);g.stroke();}
+  g.textAlign='left';g.fillStyle='#5b6671';g.font=F(400,3);g.fillText('TPE Sheet Metal — ตารางระยะ',16,283);return c;}
 /* ---------- file ---------- */
 function newJob(){if(!confirm('เริ่มงานใหม่? ค่าที่ตั้งไว้จะถูกล้าง'))return;S=defState();$('#projName').value='';buildAll();update(true);}
 async function saveJob(){S.name=$('#projName').value;const b=new Blob([JSON.stringify(S,null,1)],{type:'application/json'});if(await download(b,fileBase()+'.sheet.json'))toast('บันทึกไฟล์งานแล้ว');}
@@ -536,14 +619,14 @@ function buildAll(){$('#projName').value=S.name||'';buildShapes();buildParams();
 /* ---------- wire up ---------- */
 $('#v3').onclick=()=>setView('3d');$('#v2').onclick=()=>setView('2d');$('#fit3').onclick=fit3;$('#fit2').onclick=()=>{fit2();draw2();};
 [['#tgTiles','tiles'],['#tgMarks','marks'],['#tgDims','dims']].forEach(([id,k])=>$(id).onclick=e=>{V2[k]=!V2[k];e.currentTarget.classList.toggle('on',V2[k]);draw2();});
-$('#bPdf').onclick=exportPDF;$('#bHelp').onclick=()=>$('#help').hidden=false;$('#helpOk').onclick=()=>$('#help').hidden=true;$('#help').onclick=e=>{if(e.target.id==='help')$('#help').hidden=true;};
+$('#bPdf').onclick=exportPDF;$('#bDxf').onclick=exportDXF;$('#bHelp').onclick=()=>$('#help').hidden=false;$('#helpOk').onclick=()=>$('#help').hidden=true;$('#help').onclick=e=>{if(e.target.id==='help')$('#help').hidden=true;};
 $('#bFile').onclick=e=>{e.stopPropagation();$('#fileMenu').hidden=!$('#fileMenu').hidden;};document.addEventListener('click',()=>$('#fileMenu').hidden=true);
 $('#bNew').onclick=newJob;$('#bOpen').onclick=()=>$('#fileIn').click();$('#bSave').onclick=saveJob;$('#projName').onchange=e=>{S.name=e.target.value;save();};
 window.addEventListener('keydown',e=>{const mod=e.ctrlKey||e.metaKey;if(mod&&e.code==='KeyS'){e.preventDefault();saveJob();}else if(mod&&e.code==='KeyO'){e.preventDefault();$('#fileIn').click();}else if(e.altKey&&e.code==='KeyN'){e.preventDefault();newJob();}else if(e.key==='Escape'){$('#help').hidden=true;$('#fileMenu').hidden=true;}});
 window.addEventListener('resize',()=>{if(VIEW==='2d')draw2();});
 load();buildAll();update(true);
 document.fonts&&document.fonts.ready.then(()=>{if(VIEW==='2d')draw2();});
-window.__sm={get S(){return S;},get R(){return R;},runShape,tilePlan,exportPDF,setView,update};
+window.__sm={get S(){return S;},get R(){return R;},runShape,tilePlan,exportPDF,exportDXF,buildDXF,setView,update,nestEstimate};
 
 })();
 </script>

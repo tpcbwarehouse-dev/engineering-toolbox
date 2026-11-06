@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TPE Sheet Metal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+/* Layout: inspector left (shape + size + material), workspace right (3D / flat pattern) */
+:root{
+  --bg:#eceff2;--surface:#f7f8f9;--panel:#ffffff;--ink:#15191d;--muted:#5b6671;--line:#d3d8dd;--line2:#e7eaed;
+  --accent:#c4501f;--accent-ink:#fff;--accent-soft:#f7e3d9;--viewport:#f2f4f6;--ok:#2e7d4f;--warn:#a5651a;--bad:#b3261e;--blue:#1f4f8f;
+  --sans:"IBM Plex Sans Thai","Noto Sans Thai","Leelawadee UI",Tahoma,sans-serif;--mono:"IBM Plex Mono",Menlo,Consolas,monospace;color-scheme:light}
+*{box-sizing:border-box}html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans)}
+#app{display:grid;grid-template-rows:auto minmax(0,1fr) auto;height:100%}
+.topbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px max(14px,env(safe-area-inset-right,0px)) 8px max(14px,env(safe-area-inset-left,0px));background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:8px;font:600 13px var(--mono);letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+.brand i{width:18px;height:14px;border:2px solid var(--accent);border-radius:2px;transform:skewX(-14deg);display:inline-block}
+.projname{font:600 15px var(--sans);border:1px solid transparent;background:transparent;color:var(--ink);padding:4px 6px;border-radius:6px;min-width:120px;max-width:340px;flex:1 1 160px}
+.projname:hover,.projname:focus{border-color:var(--line);background:var(--panel);outline:none}
+.sp{flex:1}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:7px;padding:6px 10px;font:500 13px var(--sans);cursor:pointer;white-space:nowrap;min-height:32px}
+.btn:hover{border-color:#aab3bc;background:var(--surface)}.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}.btn.primary:hover{background:#ad451a}
+.btn.ghost{background:transparent}.btn.sm{padding:3px 8px;min-height:26px;font-size:12px}.btn.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.main{display:grid;grid-template-columns:370px minmax(0,1fr);min-height:0}
+.side{background:var(--panel);border-right:1px solid var(--line);overflow:auto;padding:12px 14px 30px}
+.side h3{margin:16px 0 8px;font:600 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.side h3:first-child{margin-top:2px}
+.shapes{display:flex;flex-direction:column;gap:8px}.sgrp>span{display:block;font-size:11.5px;color:var(--muted);margin:2px 0 4px}
+.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(98px,1fr));gap:6px}
+.shp{display:flex;flex-direction:column;align-items:center;gap:3px;border:1px solid var(--line);background:var(--surface);border-radius:9px;padding:7px 4px 6px;cursor:pointer;font:500 11.5px/1.25 var(--sans);color:var(--ink);text-align:center}
+.shp svg{width:44px;height:34px;stroke:#3d4954;fill:none;stroke-width:1.5}.shp:hover{border-color:#aab3bc}.shp.on{border-color:var(--accent);background:var(--accent-soft)}.shp.on svg{stroke:var(--accent)}
+.field{display:grid;grid-template-columns:1fr 128px;align-items:center;gap:8px;margin:5px 0}.field>span{font-size:13px;color:#2c353d}
+.field input,.field select{width:100%;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font:13px var(--sans);background:var(--panel);color:var(--ink)}
+.field input[type=number]{font-family:var(--mono)}.field .u{position:relative}.field .u input{padding-right:34px}.field .u em{position:absolute;right:7px;top:50%;transform:translateY(-50%);font:normal 11px var(--mono);color:var(--muted);pointer-events:none}
+.field.wide{grid-template-columns:1fr}.field.wide>span{margin-bottom:-2px}
+.presets{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 6px}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 6px}.chips button{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:2px 8px;font:12px var(--mono);cursor:pointer;color:var(--ink)}.chips button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.hint{color:var(--muted);font-size:12px}
+table.t{width:100%;border-collapse:collapse;font-size:12.5px}table.t td,table.t th{padding:4px 5px;border-bottom:1px solid var(--line2);text-align:left;vertical-align:top}table.t th{font-weight:600;color:var(--muted);font-size:11.5px}
+table.t td.n{font-family:var(--mono);text-align:right;white-space:nowrap}
+.warn{background:#fff6e5;border:1px solid #f0d49b;color:#6d4a0c;border-radius:8px;padding:7px 9px;font-size:12.5px;margin:6px 0}
+.work{position:relative;min-width:0;min-height:0;background:var(--viewport)}
+.work canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.vtabs{position:absolute;top:10px;left:10px;z-index:5;display:flex;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:3px}
+.vtabs button{border:0;background:transparent;border-radius:6px;padding:5px 11px;font:500 13px var(--sans);cursor:pointer;color:var(--muted)}.vtabs button.on{background:var(--ink);color:#fff}
+.vtools{position:absolute;top:10px;right:10px;z-index:5;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;max-width:calc(100% - 200px)}
+.legend{position:absolute;left:10px;bottom:10px;z-index:5;background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:11.5px;display:flex;gap:12px;flex-wrap:wrap}
+.legend i{display:inline-block;width:22px;height:0;border-top:2px solid #111;vertical-align:middle;margin-right:4px}
+.status{display:flex;gap:14px;align-items:center;padding:5px 14px;background:var(--panel);border-top:1px solid var(--line);font-size:12px;color:var(--muted);min-height:30px;flex-wrap:wrap}
+.status b{color:var(--ink);font-family:var(--mono);font-weight:500}
+#toast{position:fixed;left:50%;bottom:46px;transform:translateX(-50%);background:#1c2329;color:#fff;padding:9px 14px;border-radius:9px;font-size:13px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.2);max-width:90vw}
+.modal{position:fixed;inset:0;background:rgba(20,28,36,.32);display:flex;align-items:center;justify-content:center;z-index:40;padding:16px}
+.modal .box{background:var(--panel);border-radius:14px;border:1px solid var(--line);width:min(560px,100%);max-height:calc(100vh - 32px);overflow:auto;padding:16px 18px;box-shadow:0 20px 60px rgba(20,30,40,.25)}
+.modal h4{margin:0 0 8px;font-size:16px}.modal ol{padding-left:20px;margin:6px 0}.modal li{margin:3px 0}
+.drop{position:absolute;top:44px;left:0;background:var(--panel);border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 30px rgba(0,0,0,.12);padding:4px;z-index:30;min-width:220px}
+.drop button{display:flex;justify-content:space-between;width:100%;border:0;background:transparent;padding:7px 10px;border-radius:6px;font:13px var(--sans);cursor:pointer;color:var(--ink)}.drop button:hover{background:var(--surface)}
+.drop kbd{font:11px var(--mono);color:var(--muted)}
+[hidden]{display:none!important}
+@media (max-width:820px){#app{height:auto;min-height:100%}.main{grid-template-columns:1fr;grid-template-rows:auto 72vh}.side{overflow:visible}.side{border-right:0;border-bottom:1px solid var(--line);max-height:none}.work{min-height:420px}.vtools{max-width:calc(100% - 20px);top:52px}}
+</style>
+</head><body><div id="app">
+  <header class="topbar">
+    <div class="brand"><i></i>TPE Sheet Metal</div>
+    <input class="projname" id="projName" aria-label="ชื่องาน" placeholder="ชื่องาน / Job">
+    <div style="position:relative"><button class="btn" id="bFile">ไฟล์ ▾</button>
+      <div class="drop" id="fileMenu" hidden>
+        <button id="bNew">งานใหม่ <kbd>Alt+N</kbd></button><button id="bOpen">เปิดไฟล์งาน… <kbd>Ctrl+O</kbd></button><button id="bSave">บันทึกไฟล์งาน <kbd>Ctrl+S</kbd></button>
+      </div></div>
+    <span class="sp"></span>
+    <button class="btn ghost" id="bHelp">วิธีพิมพ์แบบ 1:1</button>
+    <button class="btn primary" id="bPdf">Export PDF แบบตัด 1:1 (A3)</button>
+  </header>
+  <div class="main">
+    <aside class="side" id="side">
+      <h3>1 · ชนิดชิ้นงาน</h3><div class="shapes" id="shapes"></div>
+      <h3>2 · ขนาด</h3><div id="presets" class="presets"></div><div id="params"></div>
+      <h3>3 · วัสดุ</h3>
+      <label class="field"><span>วัสดุ</span><select id="mat"></select></label>
+      <label class="field"><span>ความหนา t</span><span class="u"><input id="t" type="number" step="0.1" min="0.1"><em>มม.</em></span></label>
+      <div class="chips" id="tchips"></div>
+      <label class="field"><span>ขนาดแผ่นเหล็ก</span><select id="sheet"></select></label>
+      <label class="field"><span>หมุนชิ้นให้ใช้พื้นที่น้อยสุด</span><select id="rotFit"><option value="0">ไม่หมุน</option><option value="1">หมุนอัตโนมัติ</option></select></label>
+      <h3>4 · การพิมพ์ A3 ขนาดจริง</h3>
+      <label class="field"><span>ระยะทับต่อหน้า</span><span class="u"><input id="ov" type="number" step="1" min="5"><em>มม.</em></span></label>
+      <label class="field"><span>ขอบกระดาษ (ไม่พิมพ์)</span><span class="u"><input id="mg" type="number" step="1" min="4"><em>มม.</em></span></label>
+      <label class="field"><span>หน้าแรกเป็นภาพรวม</span><select id="ovw"><option value="1">ใส่</option><option value="0">ไม่ใส่</option></select></label>
+      <h3>ผลลัพธ์</h3>
+      <div id="warns"></div>
+      <table class="t" id="ptab"></table>
+      <table class="t" id="itab" style="margin-top:8px"></table>
+    </aside>
+    <section class="work" id="work">
+      <canvas id="gl"></canvas><canvas id="fc" hidden></canvas>
+      <div class="vtabs" role="tablist"><button id="v3" class="on">3D</button><button id="v2">แผ่นคลี่ (Flat)</button></div>
+      <div class="vtools" id="vt3"><button class="btn sm" id="fit3">พอดีจอ</button></div>
+      <div class="vtools" id="vt2" hidden><button class="btn sm on" id="tgTiles">กรอบหน้า A3</button><button class="btn sm on" id="tgMarks">เส้นมาร์ก</button><button class="btn sm on" id="tgDims">ขนาด</button><button class="btn sm" id="fit2">พอดีจอ</button></div>
+      <div class="legend" id="leg2" hidden><span><i></i>เส้นตัด</span><span><i style="border-top:1.5px dashed #1f4f8f"></i>เส้นพับ</span><span><i style="border-top:1px dashed #8a949e"></i>เส้นมาร์ก/ม้วน</span><span><i style="border-top:1px solid #d9a441"></i>กรอบหน้า A3</span></div>
+    </section>
+  </div>
+  <footer class="status" id="status"></footer>
+</div>
+<div id="toast" hidden></div>
+<input type="file" id="fileIn" accept=".json,.sheet.json,application/json" hidden>
+<div class="modal" id="help" hidden><div class="box">
+  <h4>พิมพ์แบบตัดขนาดจริง (1:1) บน A3</h4>
+  <ol>
+    <li>Export PDF แล้วสั่งพิมพ์ A3 ที่ <b>100% / Actual size</b> — ห้ามเลือก Fit to page</li>
+    <li>วัดแถบสเกล <b>100 มม.</b> ที่ขอบล่างทุกหน้า ถ้าไม่ได้ 100 มม. ให้ตั้งเครื่องพิมพ์ใหม่</li>
+    <li>เรียงหน้าตามรหัส <b>แถว A, B, C… / คอลัมน์ 1, 2, 3…</b> (เช่น P1-A1, P1-A2) ตามภาพรวมหน้าแรก</li>
+    <li>ตัดกระดาษหน้าขวา/ล่างตามกรอบเส้นประด้าน <b>ซ้ายและบน</b> แล้ววางทับหน้าก่อนหน้า ให้เครื่องหมาย <b>+</b> ในแถบทับซ้อนตรงกัน ติดเทป</li>
+    <li>วางแบบบนแผ่นเหล็ก ตอก/ขีดตามเส้นตัด เส้นพับ (เส้นประน้ำเงิน) และเส้นมาร์ก (สำหรับม้วน/พับเป็นจังหวะ)</li>
+  </ol>
+  <p class="hint">ขนาดคลี่คิดที่ <b>กลางเนื้อ</b> (Neutral) ตามความหนา — ตั้งได้ว่า D/ขนาดที่ป้อนเป็นขนาดภายใน ภายนอก หรือกลางเนื้อ · งานพับคิด Bend allowance จาก K-factor</p>
+  <div style="text-align:right;margin-top:10px"><button class="btn primary" id="helpOk">เข้าใจแล้ว</button></div></div></div>
+<script>
+(()=>{'use strict';
+/* ================= GEOMETRY CORE ================= */
+const PI=Math.PI,D2R=PI/180,R2D=180/PI;
+const v3=(x,y,z)=>[x,y,z];
+const vadd=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],vsub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],vmul=(a,k)=>[a[0]*k,a[1]*k,a[2]*k];
+const d3=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]),d2=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+const TOL=0.08; // chord tolerance mm (true-scale templates)
+function arcN(r,ang){r=Math.abs(r);ang=Math.abs(ang);if(r<1e-6||ang<1e-9)return 1;const st=2*Math.acos(Math.max(-1,1-TOL/r));return Math.max(2,Math.min(2880,Math.ceil(ang/st)));}
+function arc2(cx,cy,r,a0,a1,n){n=n||arcN(r,a1-a0);const o=[];for(let i=0;i<=n;i++){const a=a0+(a1-a0)*i/n;o.push([cx+r*Math.cos(a),cy+r*Math.sin(a)]);}return o;}
+function polyLen(p){let L=0;for(let i=1;i<p.length;i++)L+=d2(p[i-1],p[i]);return L;}
+function polyArea(p){let A=0;for(let i=0,j=p.length-1;i<p.length;j=i++)A+=(p[j][0]+p[i][0])*(p[j][1]-p[i][1]);return Math.abs(A/2);}
+function bbox(pts){let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(const p of pts){if(p[0]<x0)x0=p[0];if(p[0]>x1)x1=p[0];if(p[1]<y0)y0=p[1];if(p[1]>y1)y1=p[1];}return {x0,y0,x1,y1,w:x1-x0,h:y1-y0};}
+/* place a point at distance dA from A and dB from B, always on the right of A→B (consistent unfolding) */
+function place(A,B,dA,dB){const dx=B[0]-A[0],dy=B[1]-A[1],d=Math.hypot(dx,dy)||1e-9;const a=(dA*dA-dB*dB+d*d)/(2*d);const h=Math.sqrt(Math.max(0,dA*dA-a*a));const ux=dx/d,uy=dy/d;return [A[0]+a*ux+h*uy,A[1]+a*uy-h*ux];}
+/* unfold a triangulated strip between bottom path P and top path Q (3D). steps: 'B' advances bottom, 'T' advances top.
+   Returns 2D bottom/top paths and the triangulation lines (true lengths preserved exactly). */
+function unfoldStrip(P,Q,steps){const p2=[[0,0]],q2=[[0,d3(P[0],Q[0])]];let i=0,j=0;const lines=[[p2[0],q2[0],0,0]];
+  for(const st of steps){if(st==='B'){const n=place(p2[i],q2[j],d3(P[i],P[i+1]),d3(Q[j],P[i+1]));p2.push(n);i++;lines.push([n,q2[j],i,j]);}
+    else{const n=place(p2[i],q2[j],d3(P[i],Q[j+1]),d3(Q[j],Q[j+1]));q2.push(n);j++;lines.push([p2[i],n,i,j]);}}
+  return {bot:p2,top:q2,lines};}
+/* split a strip at seams given as [bottomIndex, topIndex] pairs → independent pieces */
+function splitStrip(P,Q,steps,cuts){const cs=new Set(cuts.map(c=>c[0]+','+c[1])),out=[];let i=0,j=0,s0=0,i0=0,j0=0;
+  for(let k=0;k<steps.length;k++){if(steps[k]==='B')i++;else j++;const last=k===steps.length-1;
+    if(last||cs.has(i+','+j)){out.push({P:P.slice(i0,i+1),Q:Q.slice(j0,j+1),steps:steps.slice(s0,k+1)});s0=k+1;i0=i;j0=j;}}
+  return out;}
+/* triangle list (3D) of a strip for the 3D view */
+function stripTris(P,Q,steps){const t=[];let i=0,j=0;for(const st of steps){if(st==='B'){t.push([P[i],Q[j],P[i+1]]);i++;}else{t.push([P[i],Q[j],Q[j+1]]);j++;}}return t;}
+/* steps for paired sections: choose the shorter diagonal in each quad */
+function pairSteps(P,Q){const s=[];for(let k=0;k+1<P.length;k++){s.push(d3(P[k+1],Q[k])<=d3(P[k],Q[k+1])?'B':'T');s.push(s.at(-1)==='B'?'T':'B');}return s;}
+/* turn an unfolded strip into a piece: outline (closed), seam allowance tab on the closing edge, mark lines */
+function stripPiece(U,o){const bot=U.bot,top=U.top;let out=[...bot];const pb=bot.at(-1),pt=top.at(-1);
+  const seams=[[bot[0],top[0]],[pb,pt]];const bends=[];
+  if(o.lap>0){const dx=pt[0]-pb[0],dy=pt[1]-pb[1],L=Math.hypot(dx,dy)||1,nx=dy/L,ny=-dx/L;out.push([pb[0]+nx*o.lap,pb[1]+ny*o.lap],[pt[0]+nx*o.lap,pt[1]+ny*o.lap]);bends.push({a:pb,b:pt,txt:'ตะเข็บ/ทับ '+fmt(o.lap),kind:'lap'});}
+  out=out.concat([...top].reverse());
+  const marks=(o.markIdx||[]).map(k=>U.lines[k]).filter(Boolean).map(l=>({a:l[0],b:l[1]}));
+  return {outline:out,holes:[],marks,bends:bends.concat(o.bends||[]),seams};}
+/* rotate/translate a piece so it sits nicely (longest chord horizontal, min corner at 0,0) */
+function normPiece(pc,rot){const all=pc.outline;let ang=0;
+  if(rot==='auto'){const a=all[0],b=all[Math.floor(all.length/2)];ang=0;/* keep unfolding frame */}
+  const tf=p=>p;void ang;const bb=bbox(all);const sh=p=>[p[0]-bb.x0,p[1]-bb.y0];
+  const mapP=p=>sh(tf(p));pc.outline=pc.outline.map(mapP);pc.holes=(pc.holes||[]).map(h=>h.map(mapP));
+  pc.marks=(pc.marks||[]).map(m=>({...m,a:mapP(m.a),b:mapP(m.b)}));pc.bends=(pc.bends||[]).map(m=>({...m,a:mapP(m.a),b:mapP(m.b),...(m.arc?{arc:m.arc.map(mapP)}:{})}));
+  pc.texts=(pc.texts||[]).map(t=>({...t,p:mapP(t.p)}));pc.seams=(pc.seams||[]).map(s=>[mapP(s[0]),mapP(s[1])]);pc.extra=(pc.extra||[]).map(l=>l.map(mapP));
+  const b2=bbox(pc.outline);pc.w=b2.w;pc.h=b2.h;return pc;}
+/* rotate piece so its bounding box is smallest (sheet use) */
+function fitRotate(pc){const pts=pc.outline;let best={a:0,area:Infinity};for(let d=0;d<180;d+=1){const a=d*D2R,c=Math.cos(a),s=Math.sin(a);const b=bbox(pts.map(p=>[p[0]*c-p[1]*s,p[0]*s+p[1]*c]));const ar=b.w*b.h+1e-6*d;if(ar<best.area-1e-6)best={a,area:ar,w:b.w,h:b.h};}
+  let a=best.a;{const c=Math.cos(a),s=Math.sin(a);const b=bbox(pts.map(p=>[p[0]*c-p[1]*s,p[0]*s+p[1]*c]));if(b.h>b.w)a+=PI/2;}
+  const c=Math.cos(a),s=Math.sin(a),R=p=>[p[0]*c-p[1]*s,p[0]*s+p[1]*c];
+  pc.outline=pc.outline.map(R);pc.holes=(pc.holes||[]).map(h=>h.map(R));pc.marks=(pc.marks||[]).map(m=>({...m,a:R(m.a),b:R(m.b)}));pc.bends=(pc.bends||[]).map(m=>({...m,a:R(m.a),b:R(m.b),...(m.arc?{arc:m.arc.map(R)}:{})}));
+  pc.texts=(pc.texts||[]).map(t=>({...t,p:R(t.p),ang:(t.ang||0)+a}));pc.seams=(pc.seams||[]).map(q=>[R(q[0]),R(q[1])]);pc.extra=(pc.extra||[]).map(l=>l.map(R));pc.rot=a;return pc;}
+const fmt=(v,d=0)=>(+v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmt1=v=>fmt(v,Math.abs(v)<100?1:0);
+
+/* ================= MATERIALS ================= */
+const MATS={
+  SS400:{th:'เหล็ก SS400 / Mild steel',rho:7850,K:0.42},
+  SPHC:{th:'เหล็กแผ่นดำ SPHC / SPCC',rho:7850,K:0.42},
+  GI:{th:'เหล็กชุบสังกะสี GI / SGCC',rho:7850,K:0.42},
+  SUS304:{th:'สแตนเลส SUS304',rho:7930,K:0.45},
+  SUS316:{th:'สแตนเลส SUS316',rho:7980,K:0.45},
+  AL5052:{th:'อลูมิเนียม 5052',rho:2680,K:0.40}};
+const SHEETS={'1219x2438':[1219,2438],'1524x3048':[1524,3048],'1219x3048':[1219,3048],'1500x6000':[1500,6000]};
+const BASIS=[['ID','ขนาดภายใน (ID)'],['OD','ขนาดภายนอก (OD)'],['MEAN','ขนาดกลางเนื้อ (Mean)']];
+/* mean (neutral) size from a given size: ID → +t, OD → −t */
+const mean=(v,b,t)=>b==='ID'?v+t:b==='OD'?v-t:v;
+const tri3=(rows)=>{const t=[];for(let i=0;i+1<rows.length;i++)for(let k=0;k+1<rows[i].length;k++){const a=rows[i][k],b=rows[i][k+1],c=rows[i+1][k],d=rows[i+1][k+1];t.push([a,b,d],[a,d,c]);}return t;};
+
+/* ---------- round → round (cylinder, concentric / eccentric cone) ---------- */
+function roundStrip(R1,R2,H,ex,ey,seam,n,lap,name,mk=12){
+  let N=Math.max(48,arcN(Math.max(R1,R2),2*PI));const m=12*n;N=Math.min(2880,Math.ceil(N/m)*m);
+  const e=Math.hypot(ex,ey),off=e>0.01?Math.atan2(ey,ex):-PI/2,f0=seam==='long'?off+PI:off;
+  const P=[],Q=[];for(let k=0;k<=N;k++){const f=f0+2*PI*k/N;P.push([R1*Math.cos(f),R1*Math.sin(f),0]);Q.push([ex+R2*Math.cos(f),ey+R2*Math.sin(f),H]);}
+  const steps=pairSteps(P,Q),cuts=[];for(let k=1;k<n;k++)cuts.push([k*N/n,k*N/n]);
+  const parts=splitStrip(P,Q,steps,cuts),step=N/mk;
+  const pieces=parts.map((pt,ix)=>{const U=unfoldStrip(pt.P,pt.Q,pt.steps);const idx=[];U.lines.forEach((l,k)=>{if(l[2]===l[3]&&l[2]%step===0&&l[2]>0&&l[2]<pt.P.length-1)idx.push(k);});
+    return {name:n>1?`${name} ${ix+1}/${n}`:name,qty:1,...stripPiece(U,{lap,markIdx:idx})};});
+  return {pieces,tris:stripTris(P,Q,steps)};}
+const SHAPES={};
+SHAPES.cyl={g:'round',th:'ท่อกลม / เปลือกทรงกระบอก',en:'Cylinder',icon:'cyl',
+  params:[{k:'D',l:'เส้นผ่านศูนย์กลาง D',u:'มม.',def:600},{k:'L',l:'ความยาว L',u:'มม.',def:1000},{k:'basis',l:'D ที่ระบุคือ',type:'sel',opts:BASIS,def:'OD'},
+    {k:'n',l:'แบ่งเป็น (ชิ้น)',type:'sel',opts:[[1,'1 ชิ้น'],[2,'2 ชิ้น'],[3,'3 ชิ้น'],[4,'4 ชิ้น']],def:1},{k:'lap',l:'เผื่อตะเข็บ/ทับ',u:'มม.',def:0}],
+  build(p,G){const Dm=mean(p.D,p.basis,G.t),r=Dm/2;const R=roundStrip(r,r,p.L,0,0,'short',+p.n,p.lap,'Shell');
+    return {...R,info:[['เส้นผ่านศูนย์กลางกลางเนื้อ',fmt1(Dm)+' มม.'],['เส้นรอบวงคลี่ (π·Dm)',fmt1(PI*Dm)+' มม.'],['ความยาว',fmt(p.L)+' มม.']]};}};
+SHAPES.cone={g:'round',th:'กรวยลด ตรงศูนย์ / เยื้องศูนย์',en:'Cone / Reducer',icon:'cone',
+  params:[{k:'D1',l:'D ใหญ่ (ล่าง) D1',u:'มม.',def:800},{k:'D2',l:'D เล็ก (บน) D2',u:'มม.',def:400},{k:'H',l:'ความสูง H',u:'มม.',def:500},
+    {k:'ex',l:'เยื้องศูนย์ X (ex)',u:'มม.',def:0},{k:'ey',l:'เยื้องศูนย์ Y (ey)',u:'มม.',def:0},{k:'basis',l:'D ที่ระบุคือ',type:'sel',opts:BASIS,def:'OD'},
+    {k:'seam',l:'ตำแหน่งตะเข็บ',type:'sel',opts:[['short','ด้านสั้น (ด้านเยื้อง)'],['long','ด้านยาว']],def:'short'},
+    {k:'n',l:'แบ่งเป็น (ชิ้น)',type:'sel',opts:[[1,'1 ชิ้น'],[2,'2 ชิ้น'],[3,'3 ชิ้น'],[4,'4 ชิ้น'],[6,'6 ชิ้น']],def:1},{k:'lap',l:'เผื่อตะเข็บ/ทับ',u:'มม.',def:0}],
+  presets:[['ตรงศูนย์',p=>({ex:0,ey:0})],['เยื้องศูนย์ ราบด้านเดียว',p=>({ex:Math.round((p.D1-p.D2)/2),ey:0})]],
+  build(p,G){const r1=mean(p.D1,p.basis,G.t)/2,r2=mean(p.D2,p.basis,G.t)/2,warn=[];if(r1<=0||r2<0)warn.push('ขนาดไม่ถูกต้อง');
+    const R=roundStrip(r1,r2,p.H,+p.ex,+p.ey,p.seam,+p.n,p.lap,'Cone');const info=[];
+    if(Math.abs(p.ex)<0.01&&Math.abs(p.ey)<0.01&&Math.abs(r1-r2)>0.01){const s=Math.hypot(p.H,r1-r2),Lb=r1*s/Math.abs(r1-r2),Ls=Lb-s,th=2*PI*r1/Lb*R2D;
+      info.push(['ความยาวตามแนวเอียง (Slant)',fmt1(s)+' มม.'],['รัศมีคลี่ วงนอก / วงใน',fmt1(Lb)+' / '+fmt1(Ls)+' มม.'],['มุมแผ่นคลี่ (Sector)',fmt(th,2)+'°'],['มุมกรวย (ครึ่งยอด)',fmt(Math.atan2(Math.abs(r1-r2),p.H)*R2D,2)+'°']);}
+    else info.push(['แบบ','กรวยเยื้องศูนย์ — คลี่ด้วย Triangulation']);
+    info.push(['เส้นรอบวงคลี่ ล่าง / บน',fmt1(2*PI*r1)+' / '+fmt1(2*PI*r2)+' มม.']);return {...R,info,warn};}};
+/* ---------- lobster-back (segmented) elbow ---------- */
+SHAPES.lobster={g:'round',th:'ข้องอกุ้ง (Lobster / Segmented elbow)',en:'Segmented elbow',icon:'lob',
+  params:[{k:'D',l:'เส้นผ่านศูนย์กลาง D',u:'มม.',def:500},{k:'R',l:'รัศมีโค้งกลาง R',u:'มม.',def:750},{k:'A',l:'มุมเลี้ยว',u:'°',def:90},
+    {k:'n',l:'จำนวนชิ้น (รวมปลาย 2 ชิ้น)',u:'ชิ้น',def:5,min:2,step:1},{k:'ext',l:'ช่วงตรงที่ปลาย',u:'มม.',def:50},{k:'basis',l:'D ที่ระบุคือ',type:'sel',opts:BASIS,def:'OD'},{k:'lap',l:'เผื่อตะเข็บ/ทับ',u:'มม.',def:0}],
+  build(p,G){const r=mean(p.D,p.basis,G.t)/2,R=+p.R,n=Math.max(2,Math.round(p.n)),A=p.A*D2R,al=A/(n-1),tn=Math.tan(al/2),warn=[];
+    if(R<=r)warn.push('รัศมีโค้ง R ต้องมากกว่ารัศมีท่อ — แนะนำ R ≥ 1.0–1.5 D');
+    const C=2*PI*r,N=Math.max(96,arcN(r,2*PI)),X=k=>C*k/N,ph=k=>PI+2*PI*k/N; // seam at throat
+    const hh=k=>(R+r*Math.cos(ph(k)))*tn;const marks=[];for(let k=1;k<12;k++)marks.push(k*N/12);
+    const lapTab=(pb,pt)=>p.lap>0?[[pb[0]+p.lap,pb[1]],[pt[0]+p.lap,pt[1]]]:[];
+    const end=[[0,0],[C,0],...lapTab([C,0],[C,p.ext+hh(N)])];for(let k=N;k>=0;k--)end.push([X(k),p.ext+hh(k)]);
+    const endM=marks.map(k=>({a:[X(k),0],b:[X(k),p.ext+hh(k)]}));
+    const pieces=[{name:'End gore (ปลาย)',qty:2,outline:end,holes:[],marks:endM,bends:p.lap>0?[{a:[C,0],b:[C,p.ext+hh(N)],txt:'ตะเข็บ/ทับ',kind:'lap'}]:[],seams:[]}];
+    if(n>2){const mid=[];for(let k=0;k<=N;k++)mid.push([X(k),-hh(k)]);mid.push(...lapTab([C,-hh(N)],[C,hh(N)]));for(let k=N;k>=0;k--)mid.push([X(k),hh(k)]);
+      pieces.push({name:'Middle gore (กลาง)',qty:n-2,outline:mid,holes:[],marks:marks.map(k=>({a:[X(k),-hh(k)],b:[X(k),hh(k)]})),bends:p.lap>0?[{a:[C,-hh(N)],b:[C,hh(N)],txt:'ตะเข็บ/ทับ',kind:'lap'}]:[],seams:[]});}
+    /* 3D */const tris=[];const bnd=[0];for(let k=1;k<n;k++)bnd.push(al/2+(k-1)*al);bnd.push(A);const M=48;
+    const c=t=>[R*Math.cos(t),R*Math.sin(t),0],nv=t=>[Math.cos(t),Math.sin(t),0],tv=t=>[-Math.sin(t),Math.cos(t),0];
+    for(let g=0;g<n;g++){const lo=bnd[g],hi=bnd[g+1],ta=g===0?0:g===n-1?A:(lo+hi)/2;const rows=[];
+      for(let k=0;k<=M;k++){const f=2*PI*k/M,base=vadd(c(ta),vadd(vmul(nv(ta),r*Math.cos(f)),[0,0,r*Math.sin(f)])),q=R+r*Math.cos(f);
+        const s0=g===0?-p.ext:q*Math.tan(lo-ta),s1=g===n-1?p.ext:q*Math.tan(hi-ta);rows.push([vadd(base,vmul(tv(ta),s0)),vadd(base,vmul(tv(ta),s1))]);}
+      tris.push(...tri3(rows));}
+    for(const t of tris)for(let i=0;i<3;i++)t[i]=[t[i][0],t[i][2],t[i][1]]; // stand the elbow up (XZ plane)
+    return {pieces,tris,warn,info:[['มุมต่อชิ้นกลาง (α)',fmt(al*R2D,2)+'°'],['มุมตัดปลาย (α/2)',fmt(al*R2D/2,2)+'°'],['ชิ้นปลาย 2 + ชิ้นกลาง',String(n-2)],['เส้นรอบวงคลี่',fmt1(C)+' มม.'],
+      ['ความยาวตามแนวโค้ง (centerline)',fmt1(R*A+2*p.ext)+' มม.']]};}};
+/* ---------- branch / tee (cylinder–cylinder intersection) ---------- */
+SHAPES.tee={g:'round',th:'ท่อแยก / ท่อสาขา (Tee, Lateral)',en:'Branch',icon:'tee',
+  params:[{k:'D1',l:'D ท่อหลัก',u:'มม.',def:600},{k:'D2',l:'D ท่อสาขา',u:'มม.',def:400},{k:'B',l:'มุมสาขากับท่อหลัก',u:'°',def:90},
+    {k:'e',l:'เยื้องศูนย์ด้านข้าง (e)',u:'มม.',def:0},{k:'Lb',l:'ความยาวสาขา (จากแกนท่อหลัก)',u:'มม.',def:600},{k:'basis',l:'D ที่ระบุคือ',type:'sel',opts:BASIS,def:'OD'},
+    {k:'main',l:'คลี่ท่อหลักพร้อมรูเจาะ',type:'sel',opts:[[1,'ใช่'],[0,'ไม่']],def:1},{k:'Lm',l:'ความยาวท่อหลัก',u:'มม.',def:1200},{k:'xm',l:'ตำแหน่งสาขา (จากปลายซ้าย)',u:'มม.',def:600},{k:'lap',l:'เผื่อตะเข็บ/ทับ',u:'มม.',def:0}],
+  build(p,G){const t=G.t,R1m=mean(p.D1,p.basis,t)/2,Ro=R1m+t/2,r=mean(p.D2,p.basis,t)/2,ro=r+t/2,b=p.B*D2R,sb=Math.sin(b),cb=Math.cos(b),e=+p.e,warn=[];
+    if(Math.abs(e)+r>Ro+1e-6)warn.push('ท่อสาขาใหญ่เกิน/เยื้องเกินท่อหลัก — ต้องให้ |e| + r ≤ R ท่อหลัก');
+    if(p.B<15||p.B>90)warn.push('มุมสาขาควรอยู่ระหว่าง 15°–90°');
+    const N=Math.max(96,arcN(r,2*PI)),C=2*PI*r,f0=PI/2;
+    const sAt=(f,rr,RR)=>{const y=Math.max(-RR,Math.min(RR,e+rr*Math.sin(f)));return (Math.sqrt(RR*RR-y*y)-rr*Math.cos(f)*cb)/sb;};
+    const bot=[],top=[];for(let k=0;k<=N;k++){const f=f0+2*PI*k/N;bot.push([C*k/N,0]);top.push([C*k/N,p.Lb-sAt(f,r,Ro)]);}
+    /* branch outline: straight end at y=0 (free end), cut curve on the other side */
+    const br=[...bot];if(p.lap>0)br.push([C+p.lap,0],[C+p.lap,top[N][1]]);br.push(...[...top].reverse());
+    const marks=[];for(let k=1;k<12;k++){const i=Math.round(k*N/12);marks.push({a:bot[i],b:top[i]});}
+    const pieces=[{name:'Branch (ท่อสาขา)',qty:1,outline:br,holes:[],marks,bends:p.lap>0?[{a:[C,0],b:[C,top[N][1]],txt:'ตะเข็บ/ทับ',kind:'lap'}]:[],seams:[]}];
+    let hole=null;
+    if(+p.main){const Cm=2*PI*R1m,M=Math.max(180,arcN(ro,2*PI));hole=[];for(let k=0;k<M;k++){const f=2*PI*k/M,y=e+ro*Math.sin(f);if(Math.abs(y)>R1m)continue;const z=Math.sqrt(R1m*R1m-y*y),s=(z-ro*Math.cos(f)*cb)/sb,x=+p.xm+s*cb-ro*Math.cos(f)*sb;hole.push([x,R1m*Math.atan2(y,z)+Cm/2]);}
+      const mo=[[0,0],[p.Lm,0],[p.Lm,Cm],[0,Cm]];if(p.lap>0)mo.splice(2,0,[p.Lm,Cm],[p.Lm,Cm+p.lap],[0,Cm+p.lap]);
+      const hb=bbox(hole);if(hb.x0<0||hb.x1>p.Lm)warn.push('รูเจาะเกินความยาวท่อหลัก — ปรับตำแหน่ง/ความยาว');
+      pieces.push({name:'Main shell + hole (ท่อหลัก)',qty:1,outline:p.lap>0?[[0,0],[p.Lm,0],[p.Lm,Cm+p.lap],[0,Cm+p.lap]]:mo,holes:[hole],
+        marks:[{a:[0,Cm/2],b:[p.Lm,Cm/2],txt:'แนวศูนย์กลางรู (ด้านบน)'},{a:[+p.xm,0],b:[+p.xm,Cm]}],bends:p.lap>0?[{a:[0,Cm],b:[p.Lm,Cm],txt:'ตะเข็บ/ทับ',kind:'lap'}]:[],seams:[]});}
+    /* 3D: main along X (0..Lm), branch from axis point (xm, e, 0) */
+    const tris=[],M3=64,Lm=+p.main?+p.Lm:Math.max(p.D1*2,2*(p.Lb*Math.abs(cb)+p.D2)),x0=+p.main?0:+p.xm-Lm/2;
+    {const rows=[];for(let k=0;k<=M3;k++){const f=2*PI*k/M3;rows.push([[x0,R1m*Math.sin(f),R1m*Math.cos(f)],[x0+Lm,R1m*Math.sin(f),R1m*Math.cos(f)]]);}tris.push(...tri3(rows));}
+    {const rows=[],d=[cb,0,sb],u=[-sb,0,cb];for(let k=0;k<=M3;k++){const f=f0+2*PI*k/M3,base=vadd([+p.xm,e,0],vadd(vmul(u,r*Math.cos(f)),[0,r*Math.sin(f),0]));rows.push([vadd(base,vmul(d,sAt(f,r,Ro))),vadd(base,vmul(d,+p.Lb))]);}tris.push(...tri3(rows));}
+    return {pieces,tris,warn,info:[['เส้นรอบวงคลี่ ท่อสาขา',fmt1(C)+' มม.'],['สาขาสั้นสุด / ยาวสุด',fmt1(Math.min(...top.map(q=>q[1])))+' / '+fmt1(Math.max(...top.map(q=>q[1])))+' มม.'],
+      ...(hole?[['ขนาดรูเจาะ (กว้าง × ยาวคลี่)',fmt1(bbox(hole).w)+' × '+fmt1(bbox(hole).h)+' มม.']]:[]),['รูปแบบ','สาขาวางบนผิวนอกท่อหลัก (Set-on)']]};}};
+/* ---------- rectangle → round ---------- */
+function rectPath(a,b,cx,cy,z,mids=true){const C=[[cx+a,cy-b],[cx+a,cy+b],[cx-a,cy+b],[cx-a,cy-b]],M=[[cx,cy-b],[cx+a,cy],[cx,cy+b],[cx-a,cy]];
+  const o=mids?[M[0],C[0],M[1],C[1],M[2],C[2],M[3],C[3],M[0]]:[C[3],C[0],C[1],C[2],C[3]];return o.map(q=>[q[0],q[1],z]);}
+SHAPES.r2r={g:'trans',th:'เหลี่ยม → กลม (Square / Rect to round)',en:'Rect to round',icon:'r2r',
+  params:[{k:'A',l:'ด้านเหลี่ยม X (A)',u:'มม.',def:800},{k:'B',l:'ด้านเหลี่ยม Y (B)',u:'มม.',def:600},{k:'D',l:'D วงกลม',u:'มม.',def:500},{k:'H',l:'ความสูง H',u:'มม.',def:500},
+    {k:'ex',l:'เยื้องศูนย์ X',u:'มม.',def:0},{k:'ey',l:'เยื้องศูนย์ Y',u:'มม.',def:0},{k:'basis',l:'ขนาดที่ระบุคือ',type:'sel',opts:BASIS,def:'ID'},
+    {k:'n',l:'แบ่งเป็น (ตะเข็บกลางด้าน)',type:'sel',opts:[[1,'1 ชิ้น'],[2,'2 ชิ้น'],[4,'4 ชิ้น']],def:1},{k:'mk',l:'เส้นพับต่อมุม (มาร์ก)',u:'เส้น',def:4,min:1,step:1},{k:'lap',l:'เผื่อตะเข็บ/ทับ',u:'มม.',def:0}],
+  build(p,G){const t=G.t,a=mean(p.A,p.basis,t)/2,b=mean(p.B,p.basis,t)/2,r=mean(p.D,p.basis,t)/2,mk=Math.max(1,Math.round(p.mk));
+    let q=Math.max(12,arcN(r,PI/2));q=Math.ceil(q/mk)*mk;
+    const P=rectPath(a,b,0,0,0),Q=[];for(let k=0;k<=4*q;k++){const f=-PI/2+k*PI/2/q;Q.push([+p.ex+r*Math.cos(f),+p.ey+r*Math.sin(f),+p.H]);}
+    const steps=['B'];for(let c=0;c<4;c++){for(let k=0;k<q;k++)steps.push('T');steps.push('B');if(c<3)steps.push('B');}
+    const n=+p.n,cuts=n===2?[[4,2*q]]:n===4?[[2,q],[4,2*q],[6,3*q]]:[];
+    let i0=0,j0=0;const parts=splitStrip(P,Q,steps,cuts);
+    const pieces=parts.map((pt,ix)=>{const U=unfoldStrip(pt.P,pt.Q,pt.steps);const idx=[],bends=[];
+      U.lines.forEach((l,k)=>{const gi=i0+l[2],gj=j0+l[3];if(gi%2===1&&(gj%q===0)){bends.push({a:l[0],b:l[1],txt:'พับ',kind:'bend'});}else if(gi%2===1&&gj%(q/mk)===0)idx.push(k);});
+      i0+=pt.P.length-1;j0+=pt.Q.length-1;return {name:n>1?`Transition ${ix+1}/${n}`:'Transition',qty:1,...stripPiece(U,{lap:p.lap,markIdx:idx,bends})};});
+    const warn=[];if(r>Math.min(a,b)+1e-6&&r<Math.max(a,b))warn.push('วงกลมใหญ่กว่าด้านแคบ — ตรวจรูปทรงอีกครั้ง');
+    const ed=k=>d3(P[k],Q[0]);void ed;
+    return {pieces,tris:stripTris(P,Q,steps),warn,info:[['ขนาดกลางเนื้อ เหลี่ยม',fmt1(2*a)+' × '+fmt1(2*b)+' มม.'],['D กลางเนื้อ',fmt1(2*r)+' มม.'],
+      ['เส้นรอบวงคลี่ (วงกลม)',fmt1(2*PI*r)+' มม.'],['ความยาวขอบเหลี่ยมรวม',fmt1(4*(a+b))+' มม.'],['ความสูงจริงที่มุม (True length)',fmt1(d3(P[1],Q[0]))+' – '+fmt1(d3(P[1],Q[q]))+' มม.']]};}};
+/* ---------- rectangle → rectangle (hopper / pyramid frustum) ---------- */
+SHAPES.rr={g:'trans',th:'เหลี่ยม → เหลี่ยม (Hopper / ปล่องลด)',en:'Rect to rect',icon:'rr',
+  params:[{k:'A1',l:'ล่าง X (A1)',u:'มม.',def:1000},{k:'B1',l:'ล่าง Y (B1)',u:'มม.',def:800},{k:'A2',l:'บน X (A2)',u:'มม.',def:400},{k:'B2',l:'บน Y (B2)',u:'มม.',def:300},
+    {k:'H',l:'ความสูง H',u:'มม.',def:600},{k:'ex',l:'เยื้องศูนย์ X',u:'มม.',def:0},{k:'ey',l:'เยื้องศูนย์ Y',u:'มม.',def:0},{k:'basis',l:'ขนาดที่ระบุคือ',type:'sel',opts:BASIS,def:'ID'},
+    {k:'seam',l:'ตะเข็บ',type:'sel',opts:[['mid1','กลางด้าน — 1 ชิ้น'],['mid2','กลางด้าน — 2 ชิ้น'],['mid4','กลางด้าน — 4 ชิ้น (มีพับ)'],['corner','ที่มุม — แผ่นเรียบ 4 แผ่น']],def:'mid1'},{k:'lap',l:'เผื่อตะเข็บ/ทับ',u:'มม.',def:0}],
+  build(p,G){const t=G.t,a1=mean(p.A1,p.basis,t)/2,b1=mean(p.B1,p.basis,t)/2,a2=mean(p.A2,p.basis,t)/2,b2=mean(p.B2,p.basis,t)/2,cor=p.seam==='corner';
+    const P=rectPath(a1,b1,0,0,0,!cor),Q=rectPath(a2,b2,+p.ex,+p.ey,+p.H,!cor),steps=pairSteps(P,Q);
+    const cuts=cor?[[1,1],[2,2],[3,3]]:p.seam==='mid2'?[[4,4]]:p.seam==='mid4'?[[2,2],[4,4],[6,6]]:[];const parts=splitStrip(P,Q,steps,cuts);let i0=0;
+    const SN=['หน้า (−Y)','ขวา (+X)','หลัง (+Y)','ซ้าย (−X)'];
+    const pieces=parts.map((pt,ix)=>{const U=unfoldStrip(pt.P,pt.Q,pt.steps),bends=[];if(!cor)U.lines.forEach(l=>{const gi=i0+l[2];if(l[2]===l[3]&&gi%2===1)bends.push({a:l[0],b:l[1],txt:'พับ',kind:'bend'});});
+      i0+=pt.P.length-1;return {name:cor?`Panel ${SN[ix]}`:parts.length>1?`Hopper ${ix+1}/${parts.length}`:'Hopper',qty:1,...stripPiece(U,{lap:p.lap,bends})};});
+    const sl=(da,h)=>Math.hypot(da,h);
+    return {pieces,tris:stripTris(P,Q,steps),info:[['ขนาดกลางเนื้อ ล่าง',fmt1(2*a1)+' × '+fmt1(2*b1)+' มม.'],['ขนาดกลางเนื้อ บน',fmt1(2*a2)+' × '+fmt1(2*b2)+' มม.'],
+      ['ความสูงจริงกลางด้าน (X± / Y±)',[fmt1(sl(a1-a2-p.ex,p.H)),fmt1(sl(a1-a2+ +p.ex,p.H)),fmt1(sl(b1-b2-p.ey,p.H)),fmt1(sl(b1-b2+ +p.ey,p.H))].join(' / ')+' มม.'],
+      ['ความยาวสันมุม (True length)',fmt1(d3(cor?P[0]:P[1],cor?Q[0]:Q[1]))+' มม.']]};}};
+/* ---------- rectangular duct radius elbow ---------- */
+SHAPES.delbow={g:'duct',th:'ข้องอท่อลมเหลี่ยม (Radius elbow)',en:'Rect duct elbow',icon:'delb',
+  params:[{k:'W',l:'ความกว้างในระนาบโค้ง W',u:'มม.',def:500},{k:'Hd',l:'ความลึกท่อ (H)',u:'มม.',def:400},{k:'Ri',l:'รัศมีด้านใน (Throat) Ri',u:'มม.',def:250},
+    {k:'A',l:'มุมเลี้ยว',u:'°',def:90},{k:'ext',l:'ช่วงตรงที่ปลาย',u:'มม.',def:50},{k:'lk',l:'เผื่อพับขอบแก้ม (Lock)',u:'มม.',def:0}],
+  build(p,G){const t=G.t,Ri=+p.Ri,Ro=Ri+ +p.W,A=p.A*D2R,ext=+p.ext,lk=+p.lk,H=+p.Hd;
+    const tv=a=>[-Math.sin(a),Math.cos(a)],pt=(R,a)=>[R*Math.cos(a),R*Math.sin(a)],ad=(q,v,k)=>[q[0]+v[0]*k,q[1]+v[1]*k];
+    const ri=Ri-lk,ro=Ro+lk;const ch=[ad(pt(ri,0),[0,-1],ext),ad(pt(ro,0),[0,-1],ext),...arc2(0,0,ro,0,A),ad(pt(ro,A),tv(A),ext),ad(pt(ri,A),tv(A),ext),...arc2(0,0,Math.max(ri,0.001),A,0)];
+    const bends=lk>0?[...[[Ri,'พับขอบ'],[Ro,'พับขอบ']].map(([R,txt])=>({a:pt(R,0),b:pt(R,A),txt,kind:'bend',arc:arc2(0,0,R,0,A)}))]:[];
+    const cheek={name:'Cheek (แก้มข้าง)',qty:2,outline:ch,holes:[],marks:[{a:pt(ri,0),b:pt(ro,0)},{a:pt(ri,A),b:pt(ro,A)}],bends,seams:[]};
+    const wrap=(R,nm)=>{const L=R*A;return {name:nm,qty:1,outline:[[0,0],[L+2*ext,0],[L+2*ext,H],[0,H]],holes:[],marks:[{a:[ext,0],b:[ext,H],txt:'เริ่มม้วน'},{a:[ext+L,0],b:[ext+L,H],txt:'สิ้นสุดม้วน'}],bends:[],seams:[]};};
+    const pieces=[cheek,wrap(Ri-t/2,'Throat wrapper (แผ่นโค้งใน)'),wrap(Ro+t/2,'Heel wrapper (แผ่นโค้งนอก)')];
+    const tris=[],M=Math.max(24,Math.ceil(p.A/3));const P3=(R,a,z)=>[R*Math.cos(a),R*Math.sin(a),z];
+    for(const z of [0,H]){const rows=[];for(let k=0;k<=M;k++){const a=A*k/M;rows.push([P3(Ri,a,z),P3(Ro,a,z)]);}tris.push(...tri3(rows));}
+    for(const R of [Ri,Ro]){const rows=[];for(let k=0;k<=M;k++){const a=A*k/M;rows.push([P3(R,a,0),P3(R,a,H)]);}tris.push(...tri3(rows));}
+    if(ext>0)for(const a of [0,A]){const s=a===0?-1:1,v=[...tv(a),0];const q=(R,z)=>vadd(P3(R,a,z),vmul(v,s*ext));
+      tris.push([P3(Ri,a,0),P3(Ro,a,0),q(Ro,0)],[P3(Ri,a,0),q(Ro,0),q(Ri,0)],[P3(Ri,a,H),P3(Ro,a,H),q(Ro,H)],[P3(Ri,a,H),q(Ro,H),q(Ri,H)],[P3(Ri,a,0),P3(Ri,a,H),q(Ri,H)],[P3(Ri,a,0),q(Ri,H),q(Ri,0)],[P3(Ro,a,0),P3(Ro,a,H),q(Ro,H)],[P3(Ro,a,0),q(Ro,H),q(Ro,0)]);}
+    const warn=[];if(Ri<p.W*0.5)warn.push('รัศมีด้านในน้อยกว่า ½W — ลมไหลไม่ดี (SMACNA แนะนำ R/W ≥ 1.0 หรือใส่ใบนำลม)');
+    return {pieces,tris,warn,info:[['รัศมีโค้งกลาง / R/W',fmt1((Ri+Ro)/2)+' มม. / '+fmt((Ri+Ro)/2/p.W,2)],['ความยาวแผ่นโค้งใน (คลี่)',fmt1((Ri-t/2)*A+2*ext)+' มม.'],['ความยาวแผ่นโค้งนอก (คลี่)',fmt1((Ro+t/2)*A+2*ext)+' มม.']]};}};
+/* ---------- press-brake profile (channel / angle / Z / hat …) ---------- */
+function bendCalc(legs,angs,r,t,K,basis){const B=angs.map(a=>{const ar=Math.abs(a)*D2R;return {ar,deg:Math.abs(a),up:a>=0,BA:ar*(r+K*t),SB:basis==='in'?Math.tan(ar/2)*r:Math.tan(ar/2)*(r+t)};});
+  const flats=legs.map((L,i)=>L-(i>0&&B[i-1]?B[i-1].SB:0)-(B[i]?B[i].SB:0));const total=flats.reduce((s,v)=>s+v,0)+B.reduce((s,b)=>s+b.BA,0);return {B,flats,total};}
+SHAPES.profile={g:'bend',th:'รางพับ / แผ่นพับหลายขั้น (Profile)',en:'Bent profile',icon:'prof',
+  params:[{k:'legs',l:'ความยาวขา (คั่นด้วย ,)',type:'text',def:'50,100,50'},{k:'angs',l:'มุมพับ (+ขึ้น / −ลง)',type:'text',def:'90,90'},{k:'Lz',l:'ความยาวราง',u:'มม.',def:1000},
+    {k:'r',l:'รัศมีพับด้านใน r',u:'มม.',def:3},{k:'K',l:'K-factor',u:'',def:0,step:0.01,hint:'0 = ใช้ค่าตามวัสดุ'},{k:'basis',l:'ขนาดขาที่ระบุ',type:'sel',opts:[['out','ขนาดนอก (Outside)'],['in','ขนาดใน (Inside)']],def:'out'}],
+  presets:[['รางตัว U',p=>({legs:'50,100,50',angs:'90,90'})],['เหล็กฉาก L',p=>({legs:'50,50',angs:'90'})],['ตัว Z',p=>({legs:'40,80,40',angs:'90,-90'})],['หมวก (Hat)',p=>({legs:'25,40,60,40,25',angs:'-90,90,90,-90'})]],
+  build(p,G){const t=G.t,K=+p.K||MATS[G.mat].K,legs=String(p.legs).split(/[,\s]+/).filter(Boolean).map(Number),angs=String(p.angs).split(/[,\s]+/).filter(Boolean).map(Number),warn=[];
+    if(angs.length!==legs.length-1)warn.push(`จำนวนมุมพับต้อง = จำนวนขา − 1 (ขา ${legs.length} → มุม ${legs.length-1})`);
+    const nb=Math.min(angs.length,legs.length-1),L=legs.slice(0,nb+1),Ag=angs.slice(0,nb);const R=bendCalc(L,Ag,+p.r,t,K,p.basis);
+    R.flats.forEach((f,i)=>{if(f<=0)warn.push(`ขา ${i+1} สั้นเกินรัศมีพับ`);else if(f<3*t)warn.push(`ขา ${i+1} ช่วงเรียบ ${fmt1(f)} มม. — สั้นกว่า ~3t อาจพับไม่ได้กับแม่พิมพ์ทั่วไป`);});
+    let x=0;const bends=[],marks=[],tab=[];const Lz=+p.Lz;
+    for(let i=0;i<=nb;i++){x+=R.flats[i];if(i<nb){const b=R.B[i],c=x+b.BA/2;marks.push({a:[x,0],b:[x,Lz]},{a:[x+b.BA,0],b:[x+b.BA,Lz]});bends.push({a:[c,0],b:[c,Lz],txt:`B${i+1} ${b.up?'ขึ้น':'ลง'} ${fmt(b.deg)}° R${fmt1(+p.r)}`,kind:'bend'});tab.push([`B${i+1}`,fmt1(c)]);x+=b.BA;}}
+    const pieces=[{name:'Blank (แผ่นตัดก่อนพับ)',qty:1,outline:[[0,0],[R.total,0],[R.total,Lz],[0,Lz]],holes:[],marks,bends,seams:[]}];
+    /* 3D: neutral line ribbon */const rn=+p.r+K*t,pts=[[0,0]];let h=0,cx=0,cy=0;
+    for(let i=0;i<=nb;i++){cx+=R.flats[i]*Math.cos(h);cy+=R.flats[i]*Math.sin(h);pts.push([cx,cy]);if(i<nb){const b=R.B[i],s=b.up?1:-1,oc=[cx-s*rn*Math.sin(h),cy+s*rn*Math.cos(h)];const n=Math.max(6,Math.ceil(b.deg/6));
+      for(let k=1;k<=n;k++){const a=h+s*b.ar*k/n;const q=[oc[0]+s*rn*Math.sin(a),oc[1]-s*rn*Math.cos(a)];pts.push(q);}h+=s*b.ar;cx=pts.at(-1)[0];cy=pts.at(-1)[1];}}
+    const rows=pts.map(q=>[[q[0],0,q[1]],[q[0],Lz,q[1]]]);const tris=tri3(rows);
+    return {pieces,tris,warn,info:[['K-factor ที่ใช้',fmt(K,2)],['ความยาวแผ่นคลี่รวม',fmt(R.total,1)+' มม.'],...R.B.map((b,i)=>[`B${i+1}: BA / Setback`,fmt(b.BA,2)+' / '+fmt(b.SB,2)+' มม.']),
+      ...tab.map(([k,v])=>[`ตำแหน่งเส้นพับ ${k} (จากขอบซ้าย)`,v+' มม.'])]};}};
+/* ---------- tray / box (4-side or 2-side flanges) ---------- */
+SHAPES.tray={g:'bend',th:'ถาด / กล่องพับ (Tray)',en:'Tray',icon:'tray',
+  params:[{k:'L',l:'ความยาว L (นอก)',u:'มม.',def:600},{k:'W',l:'ความกว้าง W (นอก)',u:'มม.',def:400},{k:'H',l:'ความสูงขอบ H (นอก)',u:'มม.',def:80},
+    {k:'sides',l:'พับขอบ',type:'sel',opts:[['4','4 ด้าน'],['2','2 ด้าน (ด้านยาว)']],def:'4'},{k:'r',l:'รัศมีพับด้านใน r',u:'มม.',def:2},{k:'K',l:'K-factor',u:'',def:0,step:0.01,hint:'0 = ใช้ค่าตามวัสดุ'},{k:'rel',l:'รูกันฉีกที่มุม Ø',u:'มม.',def:0}],
+  build(p,G){const t=G.t,K=+p.K||MATS[G.mat].K,r=+p.r,BA=PI/2*(r+K*t),SB=r+t,Hf=p.H-SB,four=p.sides==='4',warn=[];if(Hf<=0)warn.push('ความสูงขอบน้อยกว่ารัศมีพับ + t');
+    const Lb=four?p.L-2*SB:+p.L,Wb=p.W-2*SB,e=BA+Hf,X=Lb/2,Y=Wb/2;let ol;
+    if(four)ol=[[-X,-Y-e],[X,-Y-e],[X,-Y],[X+e,-Y],[X+e,Y],[X,Y],[X,Y+e],[-X,Y+e],[-X,Y],[-X-e,Y],[-X-e,-Y],[-X,-Y]];else ol=[[-X,-Y-e],[X,-Y-e],[X,Y+e],[-X,Y+e]];
+    const bends=[{a:[-X,-Y-BA/2],b:[X,-Y-BA/2]},{a:[-X,Y+BA/2],b:[X,Y+BA/2]},...(four?[{a:[X+BA/2,-Y],b:[X+BA/2,Y]},{a:[-X-BA/2,-Y],b:[-X-BA/2,Y]}]:[])].map(b=>({...b,txt:`ขึ้น 90° R${fmt1(r)}`,kind:'bend'}));
+    const marks=[{a:[-X,-Y],b:[X,-Y]},{a:[-X,-Y-BA],b:[X,-Y-BA]},{a:[-X,Y],b:[X,Y]},{a:[-X,Y+BA],b:[X,Y+BA]},...(four?[{a:[X,-Y],b:[X,Y]},{a:[X+BA,-Y],b:[X+BA,Y]},{a:[-X,-Y],b:[-X,Y]},{a:[-X-BA,-Y],b:[-X-BA,Y]}]:[])];
+    const holes=four&&p.rel>0?[[X,-Y],[X,Y],[-X,Y],[-X,-Y]].map(c=>arc2(c[0],c[1],p.rel/2,0,2*PI).slice(0,-1)):[];
+    const pieces=[{name:'Tray blank (แผ่นตัดก่อนพับ)',qty:1,outline:ol,holes,marks,bends,seams:[]}];
+    /* 3D */const tris=[],Lo=+p.L,Wo=+p.W,Ho=+p.H,q=(x0,y0,x1,y1,z0,z1,ax)=>ax==='z'?[[[x0,y0,z0],[x1,y0,z0],[x1,y1,z0]],[[x0,y0,z0],[x1,y1,z0],[x0,y1,z0]]]:ax==='x'?[[[x0,y0,z0],[x0,y1,z0],[x0,y1,z1]],[[x0,y0,z0],[x0,y1,z1],[x0,y0,z1]]]:[[[x0,y0,z0],[x1,y0,z0],[x1,y0,z1]],[[x0,y0,z0],[x1,y0,z1],[x0,y0,z1]]];
+    tris.push(...q(-Lo/2,-Wo/2,Lo/2,Wo/2,0,0,'z'),...q(-Lo/2,-Wo/2,Lo/2,-Wo/2,0,Ho,'y'),...q(-Lo/2,Wo/2,Lo/2,Wo/2,0,Ho,'y'));if(four)tris.push(...q(-Lo/2,-Wo/2,-Lo/2,Wo/2,0,Ho,'x'),...q(Lo/2,-Wo/2,Lo/2,Wo/2,0,Ho,'x'));
+    if(four&&!(p.rel>0))warn.push('มุมแบบบากเหลี่ยม — ถ้าเหล็กหนา/มุมฉีก ใส่รูกันฉีก Ø ≈ 2t ขึ้นไป');
+    return {pieces,tris,warn,info:[['K-factor ที่ใช้',fmt(K,2)],['Bend allowance (90°)',fmt(BA,2)+' มม.'],['ช่วงเรียบขอบ',fmt1(Hf)+' มม.'],['ขนาดแผ่นตัดรวม',fmt1(Lb+(four?2*e:0))+' × '+fmt1(Wb+2*e)+' มม.']]};}};
+const GROUPS=[['round','งานกลม / ท่อลมกลม'],['trans','งานแปลงหน้าตัด'],['duct','ท่อลมเหลี่ยม'],['bend','งานพับ']];
+/* run a shape → normalised pieces with area/weight */
+function runShape(S){const sh=SHAPES[S.shape],G={t:+S.t,mat:S.mat};const p={};for(const d of sh.params)p[d.k]=S.p[S.shape]?.[d.k]??d.def;
+  for(const d of sh.params)if(d.type!=='sel'&&d.type!=='text')p[d.k]=+p[d.k];
+  let R;try{R=sh.build(p,G);}catch(e){console.error(e);return {pieces:[],tris:[],warn:['คำนวณไม่สำเร็จ: '+e.message],info:[]};}
+  R.warn=R.warn||[];const M=MATS[S.mat],sheet=SHEETS[S.sheet]||[1219,2438];
+  R.pieces.forEach((pc,i)=>{pc.id='P'+(i+1);normPiece(pc);if(S.rotFit)fitRotate(pc),normPiece(pc);const A=polyArea(pc.outline)-(pc.holes||[]).reduce((s,h)=>s+polyArea(h),0);pc.area=A;pc.kg=A*G.t*M.rho*1e-9;
+    const fits=(pc.w<=sheet[0]&&pc.h<=sheet[1])||(pc.w<=sheet[1]&&pc.h<=sheet[0]);if(!fits)R.warn.push(`${pc.id} ${pc.name} (${fmt(pc.w)}×${fmt(pc.h)}) ใหญ่กว่าแผ่น ${sheet[0]}×${sheet[1]} — ต้องต่อแผ่น หรือแบ่งชิ้นเพิ่ม`);});
+  R.p=p;return R;}
+
+/* ================= APP ================= */
+const $=(q,r=document)=>r.querySelector(q),$$=(q,r=document)=>[...r.querySelectorAll(q)];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const STORE='tpe-sheetmetal-v1';
+const defState=()=>({app:'TPE Sheet Metal',v:1,name:'',shape:'cone',p:{},t:3,mat:'SS400',sheet:'1219x2438',rotFit:1,pdf:{ov:10,mg:8,ovw:1}});
+let S=defState(),R=null,VIEW='3d';
+function toast(m,ms=2600){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>t.hidden=true,ms);}
+function save(){try{localStorage.setItem(STORE,JSON.stringify(S));}catch(_){}}
+function load(){try{const o=JSON.parse(localStorage.getItem(STORE)||'null');if(o&&o.app==='TPE Sheet Metal')S=Object.assign(defState(),o,{pdf:Object.assign(defState().pdf,o.pdf||{})});}catch(_){}if(!SHAPES[S.shape])S.shape='cone';}
+let DLCAP=null;(async()=>{try{if(window.claude&&window.claude.use)DLCAP=await window.claude.use('downloads');}catch(e){DLCAP=null;}})();
+async function download(blob,name){if(DLCAP){try{await DLCAP.save({filename:name,data:blob});return true;}catch(err){const c=err&&err.code;toast(c==='declined'?'ยกเลิกการบันทึกไฟล์':'บันทึกไฟล์ไม่สำเร็จ: '+(err&&err.message||err));return false;}}
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500);return true;}
+const fileBase=()=>((S.name||SHAPES[S.shape].en)+'').replace(/[\\/:*?"<>|]+/g,'_').trim()||'sheetmetal';
+
+/* ---------- icons ---------- */
+const ICON={cyl:'<ellipse cx="22" cy="7" rx="12" ry="4"/><path d="M10 7v20M34 7v20"/><path d="M10 27a12 4 0 0 0 24 0"/>',
+  cone:'<ellipse cx="22" cy="7" rx="7" ry="2.6"/><path d="M15 7 8 27M29 7l7 20"/><path d="M8 27a14 4.5 0 0 0 28 0"/>',
+  lob:'<path d="M6 30V20l3-7 6-5 8-3h12"/><path d="M14 30V22l2-4 4-3 6-2h9"/><path d="M6 20h8M9 13l7 5M15 8l5 7M23 5l3 8"/>',
+  tee:'<path d="M3 20h38M3 31h38"/><path d="M16 20V4h12v16"/><path d="M16 20q6 4 12 0"/>',
+  r2r:'<ellipse cx="22" cy="7" rx="8" ry="2.6"/><path d="M6 25l8-5h24l-8 5z"/><path d="M14 7 6 25M30 7l8 13M14 7l16 18M30 7 14 20"/>',
+  rr:'<path d="M16 4h12l4 3H20z"/><path d="M4 25l9-6h27l-9 6z"/><path d="M16 4 4 25M28 4l3 21M32 7l8 12M20 7l-7 12"/>',
+  delb:'<path d="M6 30V18A14 14 0 0 1 20 4h18"/><path d="M15 30V18a5 5 0 0 1 5-5h18"/><path d="M6 30h9M38 4v9"/>',
+  prof:'<path d="M8 6v22h28V6"/><path d="M12 6v18h20V6"/><path d="M8 6h4M32 6h4"/>',
+  tray:'<path d="M4 16l12-8h24l-12 8z"/><path d="M4 16v8l12 0M4 24l12-8"/><path d="M16 8v8M40 8v8l-12 8H4"/><path d="M28 16v8"/>'};
+/* ---------- side panel ---------- */
+function buildShapes(){$('#shapes').innerHTML=GROUPS.map(([g,th])=>`<div class="sgrp"><span>${th}</span><div class="sgrid">${Object.entries(SHAPES).filter(([,s])=>s.g===g).map(([k,s])=>`<button class="shp${S.shape===k?' on':''}" data-s="${k}" title="${esc(s.th)}"><svg viewBox="0 0 44 34">${ICON[s.icon]||''}</svg>${esc(s.th.split(' (')[0].split(' / ')[0])}</button>`).join('')}</div></div>`).join('');
+  $$('.shp').forEach(b=>b.onclick=()=>{S.shape=b.dataset.s;buildShapes();buildParams();update(true);});}
+function pv(k,d){return S.p[S.shape]?.[k]??d.def;}
+function buildParams(){const sh=SHAPES[S.shape];S.p[S.shape]=S.p[S.shape]||{};
+  $('#presets').innerHTML=(sh.presets||[]).map((x,i)=>`<button class="btn sm" data-pr="${i}">${esc(x[0])}</button>`).join('');
+  $$('[data-pr]').forEach(b=>b.onclick=()=>{const cur={};sh.params.forEach(d=>cur[d.k]=pv(d.k,d));Object.assign(S.p[S.shape],sh.presets[+b.dataset.pr][1](cur));buildParams();update();});
+  $('#params').innerHTML=`<p class="hint" style="margin:0 0 6px"><b>${esc(sh.th)}</b></p>`+sh.params.map(d=>{const v=pv(d.k,d);
+    if(d.type==='sel')return `<label class="field"><span>${esc(d.l)}</span><select data-k="${d.k}">${d.opts.map(([k,l])=>`<option value="${k}"${String(v)===String(k)?' selected':''}>${esc(l)}</option>`).join('')}</select></label>`;
+    if(d.type==='text')return `<label class="field"><span>${esc(d.l)}</span><input data-k="${d.k}" value="${esc(v)}" style="font-family:var(--mono)"></label>`;
+    return `<label class="field"><span>${esc(d.l)}${d.hint?`<br><small class="hint">${esc(d.hint)}</small>`:''}</span><span class="u"><input type="number" data-k="${d.k}" value="${v}" step="${d.step||1}"${d.min!=null?` min="${d.min}"`:''}><em>${esc(d.u||'')}</em></span></label>`;}).join('');
+  $$('#params [data-k]').forEach(el=>{const h=()=>{const d=sh.params.find(x=>x.k===el.dataset.k);S.p[S.shape][d.k]=d.type==='sel'||d.type==='text'?el.value:+el.value;update();};el.oninput=el.tagName==='SELECT'?null:h;el.onchange=h;});}
+function buildMat(){$('#mat').innerHTML=Object.entries(MATS).map(([k,m])=>`<option value="${k}"${S.mat===k?' selected':''}>${esc(m.th)}</option>`).join('');
+  $('#sheet').innerHTML=Object.keys(SHEETS).map(k=>`<option value="${k}"${S.sheet===k?' selected':''}>${k.replace('x',' × ')} มม.</option>`).join('');
+  $('#t').value=S.t;$('#rotFit').value=String(S.rotFit||0);$('#ov').value=S.pdf.ov;$('#mg').value=S.pdf.mg;$('#ovw').value=String(S.pdf.ovw);
+  const TS=[0.6,0.8,1,1.2,1.5,2,2.3,3,4.5,6,9,12];$('#tchips').innerHTML=TS.map(v=>`<button data-t="${v}" class="${+S.t===v?'on':''}">${v}</button>`).join('');
+  $$('#tchips button').forEach(b=>b.onclick=()=>{S.t=+b.dataset.t;$('#t').value=S.t;buildMat();update();});
+  $('#mat').onchange=e=>{S.mat=e.target.value;update();};$('#t').onchange=e=>{S.t=Math.max(0.1,+e.target.value||1);buildMat();update();};
+  $('#sheet').onchange=e=>{S.sheet=e.target.value;update();};$('#rotFit').onchange=e=>{S.rotFit=+e.target.value;update(true);};
+  $('#ov').onchange=e=>{S.pdf.ov=Math.max(5,+e.target.value||10);update();};$('#mg').onchange=e=>{S.pdf.mg=Math.max(4,+e.target.value||8);update();};$('#ovw').onchange=e=>{S.pdf.ovw=+e.target.value;save();};}
+/* ---------- tiling for true-scale printing ---------- */
+const HB=7; // header / footer band inside the margin (mm)
+function tilePlan(pc){const m=S.pdf.mg,ov=S.pdf.ov;const o=[[420,297],[297,420]].map(([PW,PH])=>{const w=PW-2*m,h=PH-2*m-2*HB,sx=w-ov,sy=h-ov;
+  const cols=pc.w<=w?1:Math.ceil((pc.w-ov)/sx),rows=pc.h<=h?1:Math.ceil((pc.h-ov)/sy);return {PW,PH,w,h,sx,sy,cols,rows,n:cols*rows,land:PW>PH};});
+  const T=o[1].n<o[0].n?o[1]:o[0];T.pages=[];const segs=[];const add=(pts,cl)=>{const P=cl?[...pts,pts[0]]:pts;for(let i=1;i<P.length;i++)segs.push([P[i-1][0],pc.h-P[i-1][1],P[i][0],pc.h-P[i][1]]);};
+  add(pc.outline,true);(pc.holes||[]).forEach(h=>add(h,true));(pc.bends||[]).forEach(b=>add(b.arc||[b.a,b.b]));(pc.marks||[]).forEach(m=>add([m.a,m.b]));
+  for(let r=0;r<T.rows;r++)for(let k=0;k<T.cols;k++){const gx=k*T.sx,gy=r*T.sy;if(segs.some(q=>clipSeg(q[0]-gx,q[1]-gy,q[2]-gx,q[3]-gy,T.w,T.h)))T.pages.push([r,k]);}
+  T.all=T.n;T.n=T.pages.length;return T;}
+const rowL=r=>String.fromCharCode(65+r%26)+(r>=26?Math.floor(r/26):'');
+/* ---------- results panel ---------- */
+function update(refit){save();R=runShape(S);
+  $('#warns').innerHTML=R.warn.map(w=>`<div class="warn">${esc(w)}</div>`).join('');
+  let tk=0,tp=0;const rows=R.pieces.map(pc=>{const T=tilePlan(pc);tk+=pc.kg*pc.qty;tp+=T.n;return `<tr><td><b>${pc.id}</b></td><td>${esc(pc.name)}</td><td class="n">×${pc.qty}</td><td class="n">${fmt(pc.w)}×${fmt(pc.h)}</td><td class="n">${fmt(pc.kg*pc.qty,2)}</td><td class="n">${T.n}</td></tr>`;}).join('');
+  $('#ptab').innerHTML=`<tr><th>ชิ้น</th><th>ชื่อ</th><th>จำนวน</th><th>ขนาดคลี่ (มม.)</th><th>kg รวม</th><th>A3</th></tr>`+rows+`<tr><td></td><td><b>รวม</b></td><td></td><td></td><td class="n"><b>${fmt(tk,2)}</b></td><td class="n"><b>${tp}</b></td></tr>`;
+  $('#itab').innerHTML=R.info.map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${esc(v)}</td></tr>`).join('')+`<tr><td>ความหนา / วัสดุ</td><td class="n">${S.t} มม. · ${esc(S.mat)}</td></tr>`;
+  $('#status').innerHTML=`<span>${esc(SHAPES[S.shape].th)}</span><span>ชิ้นแบบ <b>${R.pieces.length}</b></span><span>น้ำหนักรวม <b>${fmt(tk,2)}</b> kg</span><span>PDF ขนาดจริง <b>${tp}</b> หน้า A3${S.pdf.ovw?' + ภาพรวม 1':''}</span><span class="sp"></span><span>หน่วย มม.</span>`;
+  draw3d(refit!==false);if(VIEW==='2d'){if(refit)fit2();draw2();}}
+/* ---------- 3D ---------- */
+let R3=null;
+function init3(){if(R3||!window.THREE)return;const c=$('#gl');const r=new THREE.WebGLRenderer({canvas:c,antialias:true,preserveDrawingBuffer:true});r.setPixelRatio(Math.min(2,devicePixelRatio||1));
+  const sc=new THREE.Scene();sc.background=new THREE.Color(0xf2f4f6);const cam=new THREE.PerspectiveCamera(32,1,1,1e7);cam.up.set(0,0,1);
+  const ctl=new THREE.OrbitControls(cam,c);ctl.enableDamping=true;ctl.dampingFactor=0.12;sc.add(new THREE.HemisphereLight(0xffffff,0x8f99a3,0.9));
+  const dl=new THREE.DirectionalLight(0xffffff,0.6);dl.position.set(0.4,0.6,1);cam.add(dl);sc.add(cam);const grp=new THREE.Group();sc.add(grp);R3={r,sc,cam,ctl,grp,size:1000};
+  const loop=()=>{requestAnimationFrame(loop);if(VIEW!=='3d')return;resize3();ctl.update();r.render(sc,cam);};loop();}
+function resize3(){const c=$('#gl'),w=c.clientWidth,h=c.clientHeight;if(!w||!h)return;const r=R3.r;if(r.domElement.width!==Math.round(w*r.getPixelRatio())||r.domElement.height!==Math.round(h*r.getPixelRatio())){r.setSize(w,h,false);R3.cam.aspect=w/h;R3.cam.updateProjectionMatrix();}}
+function draw3d(refit){init3();if(!R3)return;const g=R3.grp;while(g.children.length){const o=g.children.pop();o.geometry&&o.geometry.dispose();}
+  if(!R.tris.length)return;const pos=new Float32Array(R.tris.length*9);let k=0;const bb=new THREE.Box3();
+  for(const t of R.tris)for(const p of t){pos[k++]=p[0];pos[k++]=p[1];pos[k++]=p[2];}
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(pos,3));geo.computeVertexNormals();geo.computeBoundingBox();bb.copy(geo.boundingBox);
+  g.add(new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0xb9c2cb,metalness:0.35,roughness:0.55,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1})));
+  g.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo,12),new THREE.LineBasicMaterial({color:0x37424d})));
+  const sz=bb.getSize(new THREE.Vector3()),ctr=bb.getCenter(new THREE.Vector3()),D=Math.max(sz.x,sz.y,sz.z,10);
+  const grid=new THREE.GridHelper(D*3,30,0xc9d0d6,0xdde2e6);grid.rotation.x=PI/2;grid.position.set(ctr.x,ctr.y,bb.min.z-D*0.02);g.add(grid);
+  const ax=new THREE.AxesHelper(D*0.25);ax.position.set(bb.min.x-D*0.15,bb.min.y-D*0.15,bb.min.z);g.add(ax);
+  if(refit||!R3.fitted){R3.fitted=true;R3.ctr=ctr;R3.D=D;fit3();}}
+function fit3(){if(!R3||!R3.ctr)return;const c=R3.ctr,D=R3.D*1.25,cam=R3.cam;cam.position.set(c.x+D*1.35,c.y-D*1.9,c.z+D*1.15);cam.near=D/200;cam.far=D*200;cam.updateProjectionMatrix();R3.ctl.target.copy(c);R3.ctl.update();}
+/* ---------- 2D flat pattern view ---------- */
+const V2={s:0.2,ox:40,oy:400,tiles:true,marks:true,dims:true};
+function layout(){let x=0;const L=[];for(const pc of R.pieces){L.push({pc,x,y:0});x+=pc.w+Math.max(200,pc.w*0.12);}return L;}
+function fit2(){const c=$('#fc'),W=c.clientWidth,H=c.clientHeight;if(!W||!R.pieces.length)return;const L=layout(),tw=L.at(-1).x+L.at(-1).pc.w,th=Math.max(...R.pieces.map(p=>p.h));
+  V2.s=Math.min((W-120)/tw,(H-150)/th);V2.ox=60+(W-120-tw*V2.s)/2;V2.oy=H-70-(H-150-th*V2.s)/2;}
+function draw2(){const c=$('#fc'),W=c.clientWidth,H=c.clientHeight;if(!W)return;const dpr=Math.min(2,devicePixelRatio||1);if(c.width!==W*dpr||c.height!==H*dpr){c.width=W*dpr;c.height=H*dpr;}
+  const g=c.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.fillStyle='#f2f4f6';g.fillRect(0,0,W,H);const s=V2.s;
+  for(const {pc,x:ox} of layout()){const X=x=>V2.ox+(ox+x)*s,Y=y=>V2.oy-y*s;
+    const path=pts=>{g.beginPath();pts.forEach((p,i)=>i?g.lineTo(X(p[0]),Y(p[1])):g.moveTo(X(p[0]),Y(p[1])));};
+    g.beginPath();[pc.outline,...(pc.holes||[])].forEach(pts=>{pts.forEach((p,i)=>i?g.lineTo(X(p[0]),Y(p[1])):g.moveTo(X(p[0]),Y(p[1])));g.closePath();});g.fillStyle='#ffffff';g.fill('evenodd');
+    if(V2.tiles){const T=tilePlan(pc);g.save();g.strokeStyle='#d9a441';g.lineWidth=1;g.fillStyle='rgba(217,164,65,.05)';g.font='600 11px "IBM Plex Mono",monospace';
+      for(const [r,k] of T.pages){const x0=k*T.sx,y1=pc.h-r*T.sy,y0=y1-T.h;g.fillRect(X(x0),Y(y1),T.w*s,T.h*s);g.strokeRect(X(x0),Y(y1),T.w*s,T.h*s);g.fillStyle='#b07d1c';g.fillText(`${pc.id}-${rowL(r)}${k+1}`,X(x0)+4,Y(y1)+13);g.fillStyle='rgba(217,164,65,.05)';}g.restore();}
+    if(V2.marks){g.save();g.strokeStyle='#8a949e';g.lineWidth=0.8;g.setLineDash([5,4]);for(const m of pc.marks||[]){g.beginPath();g.moveTo(X(m.a[0]),Y(m.a[1]));g.lineTo(X(m.b[0]),Y(m.b[1]));g.stroke();}g.restore();}
+    g.save();g.strokeStyle='#1f4f8f';g.lineWidth=1.3;g.setLineDash([9,4,2,4]);g.fillStyle='#1f4f8f';g.font='500 11px "IBM Plex Sans Thai",sans-serif';
+    for(const b of pc.bends||[]){if(b.arc)path(b.arc);else{g.beginPath();g.moveTo(X(b.a[0]),Y(b.a[1]));g.lineTo(X(b.b[0]),Y(b.b[1]));}g.stroke();
+      if(b.txt&&s>0.08){const mx=(X(b.a[0])+X(b.b[0]))/2,my=(Y(b.a[1])+Y(b.b[1]))/2;let an=Math.atan2(Y(b.b[1])-Y(b.a[1]),X(b.b[0])-X(b.a[0]));if(an>PI/2)an-=PI;if(an<-PI/2)an+=PI;g.save();g.translate(mx,my);g.rotate(an);g.fillText(b.txt,4,-4);g.restore();}}g.restore();
+    g.strokeStyle='#111';g.lineWidth=1.6;g.setLineDash([]);path(pc.outline);g.closePath();g.stroke();for(const h of pc.holes||[]){path(h);g.closePath();g.stroke();}
+    g.fillStyle='#15191d';g.font='600 13px "IBM Plex Sans Thai",sans-serif';g.fillText(`${pc.id} · ${pc.name}${pc.qty>1?' · ×'+pc.qty:''}`,X(0),Y(pc.h)-12-(V2.dims?14:0));
+    if(V2.dims){g.save();g.strokeStyle='#5b6671';g.fillStyle='#5b6671';g.lineWidth=0.8;g.font='500 11px "IBM Plex Mono",monospace';const yb=Y(0)+18,xl=X(0)-18;
+      g.beginPath();g.moveTo(X(0),yb);g.lineTo(X(pc.w),yb);g.moveTo(X(0),yb-5);g.lineTo(X(0),yb+5);g.moveTo(X(pc.w),yb-5);g.lineTo(X(pc.w),yb+5);g.stroke();g.textAlign='center';g.fillText(fmt1(pc.w),(X(0)+X(pc.w))/2,yb+14);
+      g.beginPath();g.moveTo(xl,Y(0));g.lineTo(xl,Y(pc.h));g.moveTo(xl-5,Y(0));g.lineTo(xl+5,Y(0));g.moveTo(xl-5,Y(pc.h));g.lineTo(xl+5,Y(pc.h));g.stroke();g.translate(xl-6,(Y(0)+Y(pc.h))/2);g.rotate(-PI/2);g.fillText(fmt1(pc.h),0,0);g.restore();}}
+  /* scale bar */g.save();g.fillStyle='#5b6671';g.strokeStyle='#5b6671';g.font='11px "IBM Plex Mono",monospace';let L=[10,20,50,100,200,500,1000,2000,5000].find(v=>v*s>=80)||5000;g.beginPath();g.moveTo(W-30-L*s,H-22);g.lineTo(W-30,H-22);g.stroke();g.fillText(`${L} มม.`,W-30-L*s,H-28);g.restore();}
+function setView(v){VIEW=v;$('#v3').classList.toggle('on',v==='3d');$('#v2').classList.toggle('on',v==='2d');$('#gl').hidden=v!=='3d';$('#fc').hidden=v!=='2d';$('#vt3').hidden=v!=='3d';$('#vt2').hidden=v!=='2d';$('#leg2').hidden=v!=='2d';if(v==='2d'){fit2();draw2();}}
+(function bind2(){const c=$('#fc');let drag=null;c.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,ox:V2.ox,oy:V2.oy};c.setPointerCapture(e.pointerId);});
+  c.addEventListener('pointermove',e=>{if(!drag)return;V2.ox=drag.ox+e.clientX-drag.x;V2.oy=drag.oy+e.clientY-drag.y;draw2();});c.addEventListener('pointerup',()=>drag=null);
+  c.addEventListener('wheel',e=>{e.preventDefault();const r=c.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top,k=Math.exp(-e.deltaY*0.0015);V2.ox=mx-(mx-V2.ox)*k;V2.oy=my-(my-V2.oy)*k;V2.s*=k;draw2();},{passive:false});})();
+/* ---------- PDF: true-scale A3 tiles ---------- */
+const TXT_EN={'ขึ้น':'UP','ลง':'DOWN','พับขอบ':'FOLD','พับ':'BEND','ตะเข็บ/ทับ':'LAP','เริ่มม้วน':'ROLL START','สิ้นสุดม้วน':'ROLL END','แนวศูนย์กลางรู (ด้านบน)':'HOLE CENTERLINE (TOP)'};
+const asc=s=>{let o=String(s||'');for(const [k,v] of Object.entries(TXT_EN))o=o.split(k).join(v);return o.replace(/\([^)]*[^\x00-\x7F][^)]*\)/g,'').replace(/[^\x20-\x7E°×]/g,'').replace(/×/g,'x').replace(/\s+/g,' ').trim();};
+function clipSeg(x0,y0,x1,y1,W,H){let t0=0,t1=1;const dx=x1-x0,dy=y1-y0;const p=[-dx,dx,-dy,dy],q=[x0,W-x0,y0,H-y0];for(let i=0;i<4;i++){if(Math.abs(p[i])<1e-12){if(q[i]<0)return null;}else{const r=q[i]/p[i];if(p[i]<0){if(r>t1)return null;if(r>t0)t0=r;}else{if(r<t0)return null;if(r<t1)t1=r;}}}return [x0+t0*dx,y0+t0*dy,x0+t1*dx,y0+t1*dy];}
+function pdfPoly(doc,pts,closed,map,W,H,ox,oy){const P=closed?[...pts,pts[0]]:pts;let run=null;const flush=()=>{if(run&&run.length>1){const d=[];for(let i=1;i<run.length;i++)d.push([run[i][0]-run[i-1][0],run[i][1]-run[i-1][1]]);doc.lines(d,ox+run[0][0],oy+run[0][1],[1,1],'S',false);}run=null;};
+  for(let i=1;i<P.length;i++){const a=map(P[i-1]),b=map(P[i]);const c=clipSeg(a[0],a[1],b[0],b[1],W,H);if(!c){flush();continue;}
+    const s=[c[0],c[1]],e=[c[2],c[3]];if(run&&Math.abs(run.at(-1)[0]-s[0])<1e-6&&Math.abs(run.at(-1)[1]-s[1])<1e-6)run.push(e);else{flush();run=[s,e];}if(c[2]!==b[0]||c[3]!==b[1])flush();}flush();}
+function cross(doc,x,y,s=5){doc.line(x-s,y,x+s,y);doc.line(x,y-s,x,y+s);doc.circle(x,y,s*0.45,'S');}
+async function exportPDF(){if(!window.jspdf)return toast('โหลด jsPDF ไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ต');if(!R.pieces.length)return toast('ยังไม่มีชิ้นงาน');
+  toast('กำลังสร้าง PDF …',60000);await new Promise(r=>setTimeout(r,30));
+  try{const {jsPDF}=window.jspdf;let doc=null;const plans=R.pieces.map(pc=>({pc,T:tilePlan(pc)}));const total=plans.reduce((s,x)=>s+x.T.n,0);let pg=0;
+    const addPage=(PW,PH)=>{if(!doc)doc=new jsPDF({orientation:PW>PH?'landscape':'portrait',unit:'mm',format:'a3',compress:true});else doc.addPage('a3',PW>PH?'landscape':'portrait');};
+    if(S.pdf.ovw){addPage(420,297);await document.fonts.ready;doc.addImage(overviewCanvas(plans,total).toDataURL('image/png'),'PNG',0,0,420,297,undefined,'FAST');}
+    const proj=asc(S.name)||asc(SHAPES[S.shape].en),m=S.pdf.mg,ov=S.pdf.ov;
+    for(const {pc,T} of plans){for(const [r,k] of T.pages){pg++;addPage(T.PW,T.PH);const ox=m,oy=m+HB,W=T.w,H=T.h,gx0=k*T.sx,gy0=r*T.sy;
+      const map=p=>[p[0]-gx0,(pc.h-p[1])-gy0];const code=`${pc.id}-${rowL(r)}${k+1}`;
+      /* frame = trim line on left/top, overlap strips */
+      doc.setLineDashPattern([],0);doc.setDrawColor(190);doc.setLineWidth(0.15);doc.setLineDashPattern([3,2],0);doc.rect(ox,oy,W,H);doc.setLineDashPattern([],0);
+      doc.setFillColor(246,240,226);if(k<T.cols-1)doc.rect(ox+T.sx,oy,ov,H,'F');if(r<T.rows-1)doc.rect(ox,oy+T.sy,W,ov,'F');
+      doc.setTextColor(225);doc.setFont('helvetica','bold');doc.setFontSize(30);doc.text(code,ox+4,oy+13);
+      /* pattern */doc.setTextColor(0);
+      doc.setDrawColor(130);doc.setLineWidth(0.15);doc.setLineDashPattern([2,1.5],0);for(const mk of pc.marks||[])pdfPoly(doc,[mk.a,mk.b],false,map,W,H,ox,oy);
+      doc.setDrawColor(31,79,143);doc.setLineWidth(0.3);doc.setLineDashPattern([6,2,1,2],0);for(const b of pc.bends||[])pdfPoly(doc,b.arc||[b.a,b.b],false,map,W,H,ox,oy);
+      doc.setLineDashPattern([],0);doc.setDrawColor(0);doc.setLineWidth(0.35);pdfPoly(doc,pc.outline,true,map,W,H,ox,oy);for(const h of pc.holes||[])pdfPoly(doc,h,true,map,W,H,ox,oy);
+      /* labels */doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(31,79,143);
+      for(const b of pc.bends||[]){if(!b.txt)continue;const a=map(b.a),c=map(b.b),mx=(a[0]+c[0])/2,my=(a[1]+c[1])/2;if(mx<2||mx>W-30||my<4||my>H-2)continue;let an=Math.atan2(c[1]-a[1],c[0]-a[0])*R2D;if(an>90)an-=180;if(an<-90)an+=180;doc.text(asc(b.txt),ox+mx,oy+my-1,{angle:-an});}
+      const cen=bbox(pc.outline),lp=map([cen.x0+cen.w/2,cen.y0+cen.h/2]);doc.setTextColor(0);doc.setFontSize(12);doc.setFont('helvetica','bold');
+      if(lp[0]>0&&lp[0]<W-60&&lp[1]>6&&lp[1]<H){doc.text(`${pc.id}  ${asc(pc.name)}  x${pc.qty}`,ox+lp[0],oy+lp[1]);doc.setFontSize(8);doc.setFont('helvetica','normal');doc.text(`t=${S.t} mm ${S.mat}  |  ${fmt(pc.w)} x ${fmt(pc.h)} mm`,ox+lp[0],oy+lp[1]+4.5);}
+      /* alignment: line where the next page's trimmed edge goes + crosshairs in the overlap */
+      doc.setDrawColor(200,120,40);doc.setLineWidth(0.2);doc.setFontSize(7);doc.setTextColor(200,120,40);
+      if(k<T.cols-1){doc.line(ox+T.sx,oy,ox+T.sx,oy+H);doc.text(`${pc.id}-${rowL(r)}${k+2} >`,ox+T.sx+1,oy+H/2,{angle:-90});for(const f of [0.15,0.5,0.85])cross(doc,ox+T.sx+ov/2,oy+H*f);}
+      if(r<T.rows-1){doc.line(ox,oy+T.sy,ox+W,oy+T.sy);doc.text(`v ${pc.id}-${rowL(r+1)}${k+1}`,ox+W/2,oy+T.sy+4);for(const f of [0.15,0.5,0.85])cross(doc,ox+W*f,oy+T.sy+ov/2);}
+      if(k>0){for(const f of [0.15,0.5,0.85])cross(doc,ox+ov/2,oy+H*f);doc.text('TRIM',ox+1,oy+H-3,{angle:90});}
+      if(r>0){for(const f of [0.15,0.5,0.85])cross(doc,ox+W*f,oy+ov/2);doc.text('TRIM',ox+W-12,oy+3);}
+      /* header / footer */doc.setTextColor(60);doc.setFont('helvetica','normal');doc.setFontSize(8);
+      doc.text(`TPE SHEET METAL  |  ${proj}  |  ${pc.id} ${asc(pc.name)}  x${pc.qty}  |  t=${S.t} mm ${S.mat}`,ox,m+4);
+      doc.setFont('helvetica','bold');doc.text(`${code}   page ${pg}/${total}   PRINT 100% - ACTUAL SIZE`,ox+W,m+4,{align:'right'});
+      const fy=T.PH-m-2.5;doc.setDrawColor(0);doc.setLineWidth(0.25);doc.line(ox,fy,ox+100,fy);for(let i=0;i<=10;i++)doc.line(ox+i*10,fy,ox+i*10,fy-(i%5?1.5:2.5));
+      doc.setFont('helvetica','normal');doc.setFontSize(7);doc.text('0',ox-0.5,fy-3.2);doc.text('100 mm  (check scale)',ox+101,fy-0.3);
+      doc.text(`grid ${T.rows} rows x ${T.cols} cols (${T.n} pages used)  |  overlap ${ov} mm  |  solid = cut   dash-dot blue = bend   dashed grey = mark / roll line`,ox+W,fy-0.3,{align:'right'});}}
+    doc.setProperties({title:(S.name||SHAPES[S.shape].en)+' - flat pattern 1:1',creator:'TPE Sheet Metal'});
+    if(await download(doc.output('blob'),`${fileBase()}_pattern_1-1_A3.pdf`))toast(`สร้าง PDF ${total} หน้า A3${S.pdf.ovw?' + ภาพรวม':''} แล้ว — พิมพ์ที่ 100%`,4500);}
+  catch(err){console.error(err);toast('สร้าง PDF ไม่สำเร็จ: '+err.message,5000);}}
+function overviewCanvas(plans,total){const K=6,c=document.createElement('canvas');c.width=420*K;c.height=297*K;const g=c.getContext('2d');g.scale(K,K);g.fillStyle='#fff';g.fillRect(0,0,420,297);
+  const F=(w,sz,f='"IBM Plex Sans Thai",sans-serif')=>`${w} ${sz}px ${f}`;g.strokeStyle='#15191d';g.lineWidth=0.5;g.strokeRect(10,10,400,277);
+  g.fillStyle='#15191d';g.font=F(700,7);g.fillText(S.name||SHAPES[S.shape].th,16,22);g.font=F(500,4);g.fillStyle='#5b6671';
+  g.fillText(`${SHAPES[S.shape].th}  ·  ${MATS[S.mat].th}  ·  หนา ${S.t} มม.  ·  แบบตัดขนาดจริง ${total} หน้า A3  ·  ${new Date().toLocaleDateString('th-TH')}`,16,29);
+  /* table */let y=40;g.font=F(600,3.6);g.fillStyle='#15191d';const cols=[16,30,110,128,175,205];['ชิ้น','ชื่อ','จำนวน','ขนาดคลี่ (มม.)','น้ำหนัก (kg)','หน้า A3'].forEach((h,i)=>g.fillText(h,cols[i],y));y+=2;g.strokeStyle='#d3d8dd';g.beginPath();g.moveTo(16,y);g.lineTo(225,y);g.stroke();
+  g.font=F(400,3.6);let tk=0;for(const {pc,T} of plans){y+=5.5;tk+=pc.kg*pc.qty;[pc.id,pc.name,'×'+pc.qty,`${fmt(pc.w)} × ${fmt(pc.h)}`,fmt(pc.kg*pc.qty,2),`${T.n}`].forEach((v,i)=>g.fillText(String(v),cols[i],y));}
+  y+=6;g.font=F(600,3.6);g.fillText('รวม',30,y);g.fillText(fmt(tk,2),175,y);
+  /* info */y+=9;g.font=F(600,3.8);g.fillText('ข้อมูลคำนวณ',16,y);g.font=F(400,3.3);for(const [k,v] of R.info){y+=4.6;if(y>200)break;g.fillStyle='#5b6671';g.fillText(k,16,y);g.fillStyle='#15191d';g.fillText(v,110,y);}
+  /* instructions */let iy=212;g.font=F(600,3.8);g.fillStyle='#15191d';g.fillText('วิธีใช้แบบตัด',16,iy);g.font=F(400,3.3);
+  ['1. สั่งพิมพ์ A3 ที่ 100% / Actual size ห้าม Fit to page — วัดแถบสเกล 100 มม. ที่ขอบล่างทุกหน้า','2. เรียงหน้าตามรหัส เช่น P1-A1, P1-A2 (แถว A,B… / คอลัมน์ 1,2…) ตามผังด้านขวา',
+   '3. ตัดขอบซ้าย/บนของหน้าถัดไปตามกรอบ (TRIM) แล้ววางชิดเส้นส้มบนหน้าก่อนหน้า ให้ + ตรงกัน แล้วติดเทป','4. เส้นทึบ = เส้นตัด · เส้นประน้ำเงิน = เส้นพับ · เส้นประเทา = เส้นมาร์ก/แนวม้วน',
+   `5. ขนาดคลี่คิดที่กลางเนื้อ ตามความหนา ${S.t} มม. — ชิ้นที่มีจำนวนมากกว่า 1 ใช้แบบเดียวกันตัดซ้ำ`].forEach(t=>{iy+=5;g.fillText(t,16,iy);});
+  /* thumbnails with page grid */const bx=235,bw=168;let by=36;const bh=(250-(plans.length-1)*8)/plans.length;
+  for(const {pc,T} of plans){const gw=(T.cols-1)*T.sx+T.w,gh=(T.rows-1)*T.sy+T.h,s=Math.min(bw/Math.max(pc.w,gw),(bh-8)/Math.max(pc.h,gh));const X=x=>bx+x*s,Y=yy=>by+6+yy*s;
+    g.fillStyle='#15191d';g.font=F(600,3.6);g.fillText(`${pc.id} · ${pc.name}${pc.qty>1?' ×'+pc.qty:''}`,bx,by+3);
+    g.beginPath();pc.outline.forEach((p,i)=>{const q=[X(p[0]),Y(pc.h-p[1])];i?g.lineTo(...q):g.moveTo(...q);});g.closePath();g.fillStyle='#eef1f4';g.fill();g.strokeStyle='#15191d';g.lineWidth=0.35;g.stroke();
+    for(const h of pc.holes||[]){g.beginPath();h.forEach((p,i)=>{const q=[X(p[0]),Y(pc.h-p[1])];i?g.lineTo(...q):g.moveTo(...q);});g.closePath();g.fillStyle='#fff';g.fill();g.stroke();}
+    g.strokeStyle='#d9a441';g.lineWidth=0.3;g.font=F(600,Math.max(2.2,Math.min(4,T.w*s/6)),'"IBM Plex Mono",monospace');g.fillStyle='#b07d1c';
+    for(const [r,k] of T.pages){g.strokeRect(X(k*T.sx),Y(r*T.sy),T.w*s,T.h*s);g.fillText(`${rowL(r)}${k+1}`,X(k*T.sx)+1,Y(r*T.sy)+3.5);}by+=bh+8;}
+  g.fillStyle='#5b6671';g.font=F(400,3);g.fillText('TPE Sheet Metal — แบบคลี่ขนาดจริง',16,283);return c;}
+/* ---------- file ---------- */
+function newJob(){if(!confirm('เริ่มงานใหม่? ค่าที่ตั้งไว้จะถูกล้าง'))return;S=defState();$('#projName').value='';buildAll();update(true);}
+async function saveJob(){S.name=$('#projName').value;const b=new Blob([JSON.stringify(S,null,1)],{type:'application/json'});if(await download(b,fileBase()+'.sheet.json'))toast('บันทึกไฟล์งานแล้ว');}
+$('#fileIn').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;try{const o=JSON.parse(await f.text());if(o.app!=='TPE Sheet Metal'||!SHAPES[o.shape])throw 0;S=Object.assign(defState(),o,{pdf:Object.assign(defState().pdf,o.pdf||{})});buildAll();update(true);toast('เปิดไฟล์งานแล้ว');}catch(_){toast('ไฟล์นี้ไม่ใช่ไฟล์งาน TPE Sheet Metal');}};
+function buildAll(){$('#projName').value=S.name||'';buildShapes();buildParams();buildMat();}
+/* ---------- wire up ---------- */
+$('#v3').onclick=()=>setView('3d');$('#v2').onclick=()=>setView('2d');$('#fit3').onclick=fit3;$('#fit2').onclick=()=>{fit2();draw2();};
+[['#tgTiles','tiles'],['#tgMarks','marks'],['#tgDims','dims']].forEach(([id,k])=>$(id).onclick=e=>{V2[k]=!V2[k];e.currentTarget.classList.toggle('on',V2[k]);draw2();});
+$('#bPdf').onclick=exportPDF;$('#bHelp').onclick=()=>$('#help').hidden=false;$('#helpOk').onclick=()=>$('#help').hidden=true;$('#help').onclick=e=>{if(e.target.id==='help')$('#help').hidden=true;};
+$('#bFile').onclick=e=>{e.stopPropagation();$('#fileMenu').hidden=!$('#fileMenu').hidden;};document.addEventListener('click',()=>$('#fileMenu').hidden=true);
+$('#bNew').onclick=newJob;$('#bOpen').onclick=()=>$('#fileIn').click();$('#bSave').onclick=saveJob;$('#projName').onchange=e=>{S.name=e.target.value;save();};
+window.addEventListener('keydown',e=>{const mod=e.ctrlKey||e.metaKey;if(mod&&e.code==='KeyS'){e.preventDefault();saveJob();}else if(mod&&e.code==='KeyO'){e.preventDefault();$('#fileIn').click();}else if(e.altKey&&e.code==='KeyN'){e.preventDefault();newJob();}else if(e.key==='Escape'){$('#help').hidden=true;$('#fileMenu').hidden=true;}});
+window.addEventListener('resize',()=>{if(VIEW==='2d')draw2();});
+load();buildAll();update(true);
+document.fonts&&document.fonts.ready.then(()=>{if(VIEW==='2d')draw2();});
+window.__sm={get S(){return S;},get R(){return R;},runShape,tilePlan,exportPDF,setView,update};
+
+})();
+</script>
+</body></html>

@@ -12,7 +12,7 @@
 :root{
   --paper:#eef1f3; --sheet:#f8f9fa; --card:#ffffff; --ink:#14191e; --muted:#5a6570;
   --line:#c9d0d6; --line2:#dfe4e8; --grid:rgba(31,79,143,.07); --grid2:rgba(31,79,143,.13);
-  --accent:#c4501f; --accent-soft:#f6e2d8; --blue:#1f4f8f; --blue-soft:#dde7f3; --green:#2e6b4f; --green-soft:#dcebe2;
+  --accent:#c4501f; --accent-soft:#f6e2d8; --blue:#1f4f8f; --blue-soft:#dde7f3; --green:#2e6b4f; --green-soft:#dcebe2; --amber:#8f6200; --amber-soft:#f3e7cc; --purple:#5b3f8f; --purple-soft:#e7e0f2; --red:#a8322a; --red-soft:#f4dcd9;
   --sans:"IBM Plex Sans Thai","Leelawadee UI",Tahoma,sans-serif;
   --cond:"IBM Plex Sans Condensed","IBM Plex Sans Thai",sans-serif;
   --mono:"IBM Plex Mono",Menlo,Consolas,monospace;
@@ -20,12 +20,12 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --paper:#0f1418; --sheet:#141a1f; --card:#1a2127; --ink:#e6eaed; --muted:#93a0ab;
   --line:#2f3a43; --line2:#242d34; --grid:rgba(120,170,230,.05); --grid2:rgba(120,170,230,.10);
-  --accent:#e5743f; --accent-soft:#3a2418; --blue:#7fa9e0; --blue-soft:#1c2a3b; --green:#6cc196; --green-soft:#1a2e25;
+  --accent:#e5743f; --accent-soft:#3a2418; --blue:#7fa9e0; --blue-soft:#1c2a3b; --green:#6cc196; --green-soft:#1a2e25; --amber:#e0b04a; --amber-soft:#33280f; --purple:#b49ae6; --purple-soft:#271f38; --red:#ec7d72; --red-soft:#3a1d1a;
 }}
 :root[data-theme="dark"]{
   --paper:#0f1418; --sheet:#141a1f; --card:#1a2127; --ink:#e6eaed; --muted:#93a0ab;
   --line:#2f3a43; --line2:#242d34; --grid:rgba(120,170,230,.05); --grid2:rgba(120,170,230,.10);
-  --accent:#e5743f; --accent-soft:#3a2418; --blue:#7fa9e0; --blue-soft:#1c2a3b; --green:#6cc196; --green-soft:#1a2e25;
+  --accent:#e5743f; --accent-soft:#3a2418; --blue:#7fa9e0; --blue-soft:#1c2a3b; --green:#6cc196; --green-soft:#1a2e25; --amber:#e0b04a; --amber-soft:#33280f; --purple:#b49ae6; --purple-soft:#271f38; --red:#ec7d72; --red-soft:#3a1d1a;
 }
 *{box-sizing:border-box}
 html,body{margin:0}
@@ -81,6 +81,9 @@ h1{font:700 clamp(28px,4vw,40px)/1.15 var(--cond); margin:10px 0 6px; letter-spa
 }
 .app.blue{--c:var(--blue); --cs:var(--blue-soft)}
 .app.green{--c:var(--green); --cs:var(--green-soft)}
+.app.amber{--c:var(--amber); --cs:var(--amber-soft)}
+.app.purple{--c:var(--purple); --cs:var(--purple-soft)}
+.app.red{--c:var(--red); --cs:var(--red-soft)}
 .app:hover{transform:translate(-3px,-3px); box-shadow:6px 6px 0 var(--c); border-color:var(--c)}
 .app:focus-visible{outline:2px solid var(--c); outline-offset:3px}
 /* corner registration ticks */
@@ -217,6 +220,73 @@ h1{font:700 clamp(28px,4vw,40px)/1.15 var(--cond); margin:10px 0 6px; letter-spa
       <div class="app-foot"><span>/sheet-metal/</span><span class="open">เปิดโปรแกรม
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h15M13 6l6 6-6 6"/></svg></span></div>
     </a>
+    <a class="app amber" href="screw-conveyor/">
+      <div class="app-top"><span class="tag">APP-04</span><span>CEMA · 3D · REV 1.5.0</span></div>
+      <div class="app-body">
+        <div class="icon" aria-hidden="true">
+          <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+            <path d="M3 20h34" opacity=".5"/>
+            <path d="M8 9c3 0 3 22 6 22M14 9c3 0 3 22 6 22M20 9c3 0 3 22 6 22M26 9c3 0 3 22 6 22"/>
+            <path d="M8 9h24M14 31h18" opacity=".35"/>
+          </svg>
+        </div>
+        <div>
+          <h2>TPE Screw Conveyor</h2>
+          <p>ออกแบบสกรูลำเลียงตามมาตรฐาน CEMA คำนวณกำลังขับ แกน ราง ใบสกรู พร้อมแบบ GA แบบผลิต และโมเดล 3 มิติ</p>
+        </div>
+      </div>
+      <ul class="mods">
+        <li>CEMA Power</li><li>Shaft · Trough</li><li>3D Model</li><li>GA / Fab Drawing</li><li>DXF Flight</li><li>PDF Export</li>
+      </ul>
+      <div class="app-foot"><span>/screw-conveyor/</span><span class="open">เปิดโปรแกรม
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h15M13 6l6 6-6 6"/></svg></span></div>
+    </a>
+
+    <a class="app purple" href="panel-bench/">
+      <div class="app-top"><span class="tag">APP-05</span><span>PANEL · LAYOUT</span></div>
+      <div class="app-body">
+        <div class="icon" aria-hidden="true">
+          <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+            <rect x="7" y="4" width="26" height="32"/>
+            <path d="M10 12h20M10 22h20" stroke-width="2.6"/>
+            <path d="M12 9v6M15.5 9v6M19 9v6M24 19v6M27.5 19v6" stroke-width="2.4"/>
+            <path d="M10 30h20" opacity=".5" stroke-dasharray="2 2"/>
+          </svg>
+        </div>
+        <div>
+          <h2>Panel Bench</h2>
+          <p>จัดวางอุปกรณ์ในตู้ควบคุมไฟฟ้า บน DIN rail และรางเดินสาย วางเส้นทางสายไฟภาคสนาม และถอด BOQ</p>
+        </div>
+      </div>
+      <ul class="mods">
+        <li>Enclosure</li><li>DIN Rail · Duct</li><li>MCB · Contactor</li><li>Field Cabling</li><li>BOQ</li><li>PDF Drawing Set</li>
+      </ul>
+      <div class="app-foot"><span>/panel-bench/</span><span class="open">เปิดโปรแกรม
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h15M13 6l6 6-6 6"/></svg></span></div>
+    </a>
+
+    <a class="app red" href="boiler-calc/">
+      <div class="app-top"><span class="tag">APP-06</span><span>ASME I · REV 2026.11-1</span></div>
+      <div class="app-body">
+        <div class="icon" aria-hidden="true">
+          <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+            <rect x="4" y="11" width="32" height="18" rx="9"/>
+            <circle cx="13" cy="20" r="4.5"/>
+            <path d="M21 16h11M21 20h11M21 24h11" opacity=".6"/>
+            <path d="M18 11V6h4v5M10 29v4M30 29v4"/>
+          </svg>
+        </div>
+        <div>
+          <h2>Boiler Design Calc</h2>
+          <p>คำนวณความหนาและ MAWP ชิ้นส่วนรับแรงดันของบอยเลอร์ CRF / CBD / CWT ตาม ASME Section I</p>
+        </div>
+      </div>
+      <ul class="mods">
+        <li>CRF · CBD · CWT</li><li>Shell · Tube · Furnace</li><li>Stay · Head · Nozzle</li><li>PG-27 MAWP</li><li>PDF Export</li><li>CSV (Excel)</li>
+      </ul>
+      <div class="app-foot"><span>/boiler-calc/</span><span class="open">เปิดโปรแกรม
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h15M13 6l6 6-6 6"/></svg></span></div>
+    </a>
   </section>
 
   <footer class="titleblock" aria-label="Title block">
@@ -225,7 +295,7 @@ h1{font:700 clamp(28px,4vw,40px)/1.15 var(--cond); margin:10px 0 6px; letter-spa
     <div><small>Dwg no.</small><b>TPE-APP-000</b></div>
     <div><small>Sheet</small><b>1 / 1</b></div>
     <div><small>Location</small><b>HAT YAI, TH</b></div>
-    <div><small>Apps</small><b>03</b></div>
+    <div><small>Apps</small><b>06</b></div>
     <div><small>Year</small><b id="yr">2026</b></div>
     <div class="motto">“the more you know, the better decision you can make”</div>
   </footer>

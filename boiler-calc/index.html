@@ -1,0 +1,926 @@
+<title>Boiler Design Calc</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: drafting-sheet calculation. Sticky status bar, summary strip, then one ruled block per code check
+   (inputs left, workings right). Palette: blueprint ink on cool paper, green/red only for results. */
+:root{
+  --bg:#f2f5f7; --panel:#ffffff; --ink:#14212b; --muted:#5b6b78; --line:#d3dce3; --line2:#e6ecf0;
+  --accent:#0d5c73; --accent-ink:#ffffff;
+  --in-bg:#fff8d6; --in-ink:#10399c; --in-line:#e3d58a;
+  --pass:#0f6b3a; --pass-bg:#d8f0e1; --fail:#a11d1d; --fail-bg:#f8d9d9; --na:#5b6b78; --na-bg:#e7ecf0;
+  --f-head:"IBM Plex Sans Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f161c; --panel:#162029; --ink:#e4ebf0; --muted:#8fa0ad; --line:#2a3945; --line2:#223039;
+  --accent:#5fb7cc; --accent-ink:#0b1217;
+  --in-bg:#2a2711; --in-ink:#9fc0ff; --in-line:#5a5224;
+  --pass:#6fd39b; --pass-bg:#16382a; --fail:#ff8d8d; --fail-bg:#43201f; --na:#9fb0bc; --na-bg:#212d36; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f161c; --panel:#162029; --ink:#e4ebf0; --muted:#8fa0ad; --line:#2a3945; --line2:#223039;
+  --accent:#5fb7cc; --accent-ink:#0b1217;
+  --in-bg:#2a2711; --in-ink:#9fc0ff; --in-line:#5a5224;
+  --pass:#6fd39b; --pass-bg:#16382a; --fail:#ff8d8d; --fail-bg:#43201f; --na:#9fb0bc; --na-bg:#212d36; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px}
+.wrap{max-width:1180px;margin:0 auto}
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line);
+  padding:12px 0;display:flex;gap:12px 20px;align-items:center;flex-wrap:wrap}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+h1{font:600 20px/1.15 var(--f-head);margin:0;letter-spacing:.01em}
+.sub{color:var(--muted);font-size:12.5px;margin:2px 0 0}
+.grow{flex:1 1 280px;min-width:0}
+.overall{font:600 13px var(--f-head);letter-spacing:.06em;text-transform:uppercase;padding:7px 12px;border-radius:3px;white-space:nowrap}
+.overall.pass{background:var(--pass-bg);color:var(--pass)}.overall.fail{background:var(--fail-bg);color:var(--fail)}
+button{font:500 13px var(--f-body);color:var(--ink);background:var(--panel);border:1px solid var(--line);padding:7px 12px;border-radius:3px;cursor:pointer}
+button:hover{border-color:var(--accent)}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.note{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);padding:10px 14px;margin:16px 0;font-size:13px;color:var(--muted)}
+.note b{color:var(--ink)}
+.sumgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:6px 10px;margin:16px 0 22px}
+.chip{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--panel);border:1px solid var(--line);border-radius:3px;text-decoration:none;color:var(--ink);min-width:0}
+.chip span:first-child{min-width:0;overflow-wrap:anywhere;font-size:13px}
+.tag{font:600 11px var(--f-head);letter-spacing:.07em;padding:2px 7px;border-radius:2px;white-space:nowrap}
+.tag.pass{background:var(--pass-bg);color:var(--pass)}.tag.fail{background:var(--fail-bg);color:var(--fail)}.tag.na{background:var(--na-bg);color:var(--na)}
+details.sec{background:var(--panel);border:1px solid var(--line);margin:0 0 10px;border-radius:3px}
+details.sec>summary{list-style:none;cursor:pointer;display:flex;gap:10px 14px;align-items:center;padding:11px 14px;flex-wrap:wrap}
+details.sec>summary::-webkit-details-marker{display:none}
+details.sec>summary::before{content:"+";font:500 16px var(--f-mono);color:var(--accent);width:14px}
+details.sec[open]>summary::before{content:"−"}
+details.sec>summary .t{font:600 15px var(--f-head);flex:1 1 220px;min-width:0}
+details.sec>summary .r{font:400 12px var(--f-mono);color:var(--muted)}
+.body{display:grid;grid-template-columns:minmax(260px,5fr) minmax(300px,6fr);gap:0;border-top:1px solid var(--line)}
+.body>div{padding:12px 14px;min-width:0}
+.body>div+div{border-left:1px solid var(--line)}
+.h{font:600 11px var(--f-head);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+.fld{display:grid;grid-template-columns:1fr 112px 44px;gap:6px;align-items:center;padding:3px 0}
+.fld label{font-size:12.5px;min-width:0;overflow-wrap:anywhere}
+.fld .u{font:12px var(--f-mono);color:var(--muted)}
+.fld select.matsel{grid-column:2/4;max-width:none}
+.fld small{grid-column:1/-1;color:var(--muted);font-size:11.5px;margin-top:-2px}
+input[type=number],select{width:100%;font:500 13px var(--f-mono);background:var(--in-bg);color:var(--in-ink);border:1px solid var(--in-line);padding:5px 6px;border-radius:2px;text-align:right}
+select{text-align:left}
+input[type=text].tx{width:100%;font:500 12px var(--f-mono);background:var(--in-bg);color:var(--in-ink);border:1px solid var(--in-line);padding:4px 5px;border-radius:2px}
+table.res{width:100%;border-collapse:collapse}
+table.res td{padding:4px 0;border-bottom:1px solid var(--line2);vertical-align:baseline}
+table.res td.l{padding-right:10px;font-size:12.5px;overflow-wrap:anywhere}
+table.res td.v{text-align:right;font:500 13px var(--f-mono);white-space:nowrap}
+table.res td.u{width:46px;padding-left:6px;font:12px var(--f-mono);color:var(--muted)}
+table.res tr.b td{font-weight:600}
+.fm{font:12px/1.5 var(--f-mono);color:var(--accent);margin:8px 0 3px}
+.verdict{margin-top:12px;padding:9px 11px;font:600 13px var(--f-body);border-radius:3px}
+.verdict.pass{background:var(--pass-bg);color:var(--pass)}.verdict.fail{background:var(--fail-bg);color:var(--fail)}.verdict.na{background:var(--na-bg);color:var(--na)}
+.nz{overflow-x:auto;padding:12px 14px;border-top:1px solid var(--line)}
+table.nzt{border-collapse:collapse;min-width:100%}
+table.nzt th,table.nzt td{padding:3px 5px;border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap;font:12.5px var(--f-mono)}
+table.nzt th:first-child,table.nzt td:first-child{text-align:left;font-family:var(--f-body);white-space:normal;min-width:260px;position:sticky;left:0;background:var(--panel)}
+table.nzt thead th{font:600 12px var(--f-head);color:var(--muted);letter-spacing:.05em}
+table.nzt input{width:84px;padding:3px 4px}
+table.nzt tr.grp td{font:600 11px var(--f-head);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);background:var(--bg);text-align:left}
+table.nzt td.pass{background:var(--pass-bg);color:var(--pass);font-weight:600}
+table.nzt td.fail{background:var(--fail-bg);color:var(--fail);font-weight:600}
+.row2{display:flex;flex-wrap:wrap;gap:8px 18px;padding:10px 14px;border-top:1px solid var(--line)}
+.row2 .fld{grid-template-columns:200px 100px 34px}
+button.x{padding:0 6px;font:600 14px/1.4 var(--f-body);margin-left:4px;color:var(--muted)}button.x:disabled{opacity:.35;cursor:default}
+table.nzt td .u{font:11px var(--f-mono);color:var(--muted)}select.matsel{min-width:130px;max-width:190px;font-size:12px}
+.row2 button{align-self:center}
+.sug{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:12.5px;color:var(--ink)}
+.sug button{padding:4px 10px;font-size:12.5px;border-color:var(--accent);color:var(--accent)}
+table.rt{width:100%;border-collapse:collapse;margin-top:8px;font-size:12.5px}table.rt th,table.rt td{padding:4px 6px;border-bottom:1px solid var(--line2);text-align:left;vertical-align:top}
+table.rt td.n{text-align:right;font-family:var(--f-mono);white-space:nowrap}table.rt tr.gov td{background:var(--warn-bg);font-weight:600}table.rt th{color:var(--muted);font-weight:600;font-size:11.5px}
+.why-m{display:none;margin:2px 0 0;font-size:11.5px}
+@media (max-width:760px){table.rt td.n{white-space:normal}table.rt th:nth-child(3),table.rt td:nth-child(3){display:none}.why-m{display:block}}
+.proj{background:var(--panel);border:1px solid var(--line);padding:10px 14px;margin:14px 0 0}
+.proj .pg{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 12px}
+.proj label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
+.proj input[type=text],.proj input[type=date]{font:500 13px var(--f-body);background:var(--in-bg);color:var(--in-ink);border:1px solid var(--in-line);padding:5px 6px;border-radius:2px;width:100%}
+.proj .pb{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+.proj .pb select{width:auto;max-width:260px;text-align:left;font-family:var(--f-body)}
+
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+button.tab{display:flex;flex-direction:column;align-items:flex-start;gap:0;padding:7px 14px;border-radius:3px 3px 0 0;min-width:150px;text-align:left;font:600 15px var(--f-head);letter-spacing:.04em}
+button.tab small{font:400 11.5px var(--f-body);color:var(--muted);letter-spacing:0}
+button.tab[aria-selected="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button.tab[aria-selected="true"] small{color:var(--accent-ink);opacity:.85}
+:root{--warn:#8a5a00;--warn-bg:#fbebc8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--warn:#ffc864;--warn-bg:#3d2f10}}
+:root[data-theme="dark"]{--warn:#ffc864;--warn-bg:#3d2f10}
+.overall.warn{background:var(--warn-bg);color:var(--warn)}
+.tag.warn{background:var(--warn-bg);color:var(--warn)}
+.verdict.warn{background:var(--warn-bg);color:var(--warn)}
+table.nzt td.txt{white-space:normal;min-width:120px;max-width:220px;text-align:left}
+table.nzt select.matsel{max-width:170px}
+@media (max-width:760px){button.tab{min-width:0;flex:1 1 30%}button.tab small{display:none}}
+[hidden]{display:none!important}
+footer{color:var(--muted);font-size:12px;margin-top:22px}
+@media (max-width:760px){.body{grid-template-columns:1fr}.body>div+div{border-left:0;border-top:1px solid var(--line)}.fld{grid-template-columns:1fr 100px 40px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="grow"><h1 id="ttl">Boiler Calculation</h1>
+  <p class="sub" id="sub"></p></div>
+  <span id="overall" class="overall" role="status" aria-live="polite"></span>
+  <button id="undoBtn" type="button" disabled title="Undo (Ctrl+Z when not typing in a field)" aria-label="Undo">↶ Undo</button>
+  <button id="redoBtn" type="button" disabled title="Redo (Ctrl+Y)" aria-label="Redo">↷ Redo</button>
+  <button id="copyBtn" type="button">Copy summary</button>
+  <button id="resetBtn" type="button">Load example data</button>
+</header>
+<nav id="tabs" class="tabs" role="tablist" aria-label="Boiler model"></nav>
+
+<section class="proj" aria-label="Project">
+  <div class="pg">
+    <label>Project<input id="m-proj" type="text" placeholder="e.g. Boiler No.1"></label>
+    <label>Document no.<input id="m-doc" type="text"></label>
+    <label>Revision<input id="m-rev" type="text" size="4"></label>
+    <label>Prepared by<input id="m-by" type="text"></label>
+    <label>Date<input id="m-date" type="date"></label>
+  </div>
+  <div class="pb">
+    <button id="saveBtn" type="button" data-db hidden>Save project</button>
+    <select id="projList" data-db hidden aria-label="Saved projects"></select>
+    <button id="openBtn" type="button" data-db hidden>Open</button>
+    <button id="delBtn" type="button" data-db hidden>Delete</button>
+    <button id="expJson" type="button">Export file (.json)</button>
+    <button id="impJson" type="button">Import file</button><input type="file" id="impFile" accept=".json,application/json" hidden>
+    <button id="pdfBtn" type="button">Export PDF</button>
+    <button id="csvBtn" type="button" title="All inputs, workings and results, one value per row, for Excel">Export CSV (Excel)</button>
+    <span id="projMsg" class="sub" role="status" style="margin:0"></span>
+  </div>
+</section>
+<div class="note" id="noteBox"></div>
+
+<div id="sumgrid" class="sumgrid"></div>
+<section class="proj" id="rateBox" aria-labelledby="rateH" style="margin:-8px 0 18px">
+  <div class="pb" style="margin:0"><b id="rateH" style="font:600 14px var(--f-head)">Pressure rating</b>
+  <span class="sub" style="margin:0;flex:1 1 300px">Highest design pressure each check allows, everything else unchanged. Shows which part governs.</span>
+  <button id="rateBtn" type="button">Find maximum pressure</button></div>
+  <div id="rateOut" aria-live="polite"></div>
+</section>
+<div id="secs" role="tabpanel" aria-label="Calculation sections"></div>
+<footer id="footBox"></footer>
+<p class="sub" id="fpBox" style="font-family:var(--f-mono)"></p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+<script>
+(function(){
+"use strict";
+function fmt(x,d){if(d===undefined)d=2;if(x===null||x===undefined||typeof x!=="number"||!isFinite(x))return"–";return x.toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d})}
+var ok=function(x){return typeof x==="number"&&isFinite(x)};
+function V(state,text){return{state:state,text:text}}
+function pf(c,p,f){return c?V("pass","PASS  "+p):V("fail","FAIL  "+(f||p))}
+var R=function(l,v,u,d,b){return{l:l,v:v,u:u||"",d:d===undefined?2:d,b:b}};
+var FM=function(t){return{f:t}};
+function mk(F,r){var o={};F.forEach(function(k,i){o[k]=r[i]});return o}
+function el(tag,cls,html){var e=document.createElement(tag);if(cls)e.className=cls;if(html!==undefined)e.innerHTML=html;return e}
+function esc(t){return String(t).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+/* ---------- material library: ASME BPVC Section II Part D (Metric) 2025, Table 1A ---------- */
+var MAT_T=[40,65,100,125,150,200,250,300,325,350,375,400,425,450,475,500,525,550,575,600,625,650];
+function rep(v,n){var a=[];for(var i=0;i<n;i++)a.push(v);return a}
+var MAT={
+ "SA-516 Gr.70":{uts:485,sy:260,ch:"CS-2",form:"plate",I:454,ln:"Table 1A line 43",S:rep(138,7).concat([136,132,128,123,101,83.8,67.1,51.0,33.6,21.3,12.9])},
+ "SA-516 Gr.60":{uts:415,sy:220,ch:"CS-2",form:"plate",I:454,ln:"Table 1A line 1",S:rep(118,7).concat([115,112,108,104,88.9,75.3,62.7,45.5,31.6,21.9,12.7])},
+ "SA-285 Gr.C":{uts:380,sy:205,ch:"CS-2",form:"plate",I:482,ln:"Table 1A line 2",S:rep(108,7).concat([107,104,101,97.8,89.1,75.4,62.6,45.5,31.6])},
+ "SA-36 bar (stays)":{uts:400,sy:250,ch:"CS-2",form:"bar",I:343,ln:"Table 1A line 16, note G15",note:"Section I use is limited to stays (PG-13); SA-36 plate is not permitted in Section I",S:rep(114,10).concat([105,88.9,75.3,62.6,45.9,28.2])},
+ "SA-106 Gr.B":{uts:415,sy:240,ch:"CS-2",form:"seamless pipe",I:538,ln:"Table 1A line 14",S:rep(118,9).concat([117,105,88.9,75.3,62.7,45.5,31.6,21.9,12.7])},
+ "SA-53 Gr.B smls":{uts:415,sy:240,ch:"CS-2",form:"seamless pipe",I:482,ln:"Table 1A line 12",S:rep(118,9).concat([117,105,88.9,75.3,62.7,45.5,31.6])},
+ "SA-192":{uts:325,sy:180,ch:"CS-1",form:"seamless tube",I:538,ln:"Table 1A line 11",S:rep(92.4,7).concat([91.9,90.7,87.8,84.3,73.3,63.9,56.2,44.5,31.9,21.8,12.7])},
+ "SA-178 Gr.A":{uts:325,sy:180,ch:"CS-1",form:"ERW tube",I:538,ln:"Table 1A line 8, notes G4, W13",note:"Section I: only for tubes enclosed within the setting, OD not above 89 mm (W13)",S:rep(92.4,7).concat([91.9,90.7,87.8,84.3,73.3,63.9,56.2,44.5,31.9,21.8,12.7])},
+ "SA-179":{uts:325,sy:180,ch:"CS-1",form:"seamless tube",I:-1,ln:"Table 1A line 10",note:"Not permitted in Section I (Table 1A, column I = NP)",S:rep(92.4,7).concat([91.9,90.7,87.8,84.3,73.3,63.9,56.2,44.5,31.9])},
+ "SA-210 Gr.A-1":{uts:415,sy:255,ch:"CS-2",form:"seamless tube",I:538,ln:"Table 1A line 31",S:rep(118,9).concat([117,105,88.9,75.3,62.7,45.5,31.6,21.9,12.7])},
+ "SA-105":{uts:485,sy:250,ch:"CS-2",form:"forging",I:538,ln:"Table 1A line 29",S:rep(138,6).concat([136,129,125,122,117,101,83.9,67.0,51.1,33.6,21.3,12.9])},
+ "SA-213 T11":{uts:415,sy:205,ch:"CS-2",form:"alloy tube",I:649,ln:"Table 1A line 15",note:"1.25Cr-0.5Mo-Si; values at 400 C and above are time-dependent (note T5)",S:[118,118,118,118,118,116,112,109,108,106,104,102,99.5,96.9,94.7,72.9,51.0,36.7,25.1,17.6,12.4,8.08]},
+ "SA-213 T22":{uts:415,sy:205,ch:"CS-2",form:"alloy tube",I:649,ln:"Table 1A line 35",note:"2.25Cr-1Mo; values above 450 C are time-dependent (note T4)",S:[118,118,118,116,114,114,114,114,114,114,114,114,114,114,100,80.9,64.0,47.7,34.5,23.5,15.5,9.39]},
+ "SA-335 P11":{uts:415,sy:205,ch:"CS-2",form:"alloy pipe",I:649,ln:"Table 1A line 19",S:[118,118,118,118,118,116,112,109,108,106,104,102,99.5,96.9,94.7,72.9,51.0,36.7,25.1,17.6,12.4,8.08]},
+ "SA-335 P22":{uts:415,sy:205,ch:"CS-2",form:"alloy pipe",I:649,ln:"Table 1A line 39",S:[118,118,118,116,114,114,114,114,114,114,114,114,114,114,100,80.9,64.0,47.7,34.5,23.5,15.5,9.39]},
+ "Custom":{uts:NaN,sy:NaN,ch:"CS-2",form:"user value",I:NaN,ln:"enter the allowable stress override",S:null}};
+var MATKEYS=Object.keys(MAT),MPA=145.0377;
+function interp(xs,ys,x){var n=ys.length;if(x<=xs[0])return ys[0];for(var i=1;i<n;i++)if(x<=xs[i])return ys[i-1]+(ys[i]-ys[i-1])*(x-xs[i-1])/(xs[i]-xs[i-1]);return NaN}
+function matInfo(key,TC,ovS,ovY){var m=MAT[key]||MAT.Custom,S=NaN,w=[],src="enter value";
+ if(ovS>0){S=ovS;src="override"}
+ else if(m.S){S=interp(MAT_T,m.S,TC)*MPA;src="II-D Table 1A at "+fmt(TC,0)+" °C";if(!ok(S))w.push("above the tabulated range")}
+ if(m.S&&m.I===-1)w.push("not permitted in Section I");
+ else if(m.S&&m.I>0&&TC>m.I)w.push("above the Section I limit of "+m.I+" °C");
+ else if(m.S&&TC>450&&m.I>450&&!/alloy/.test(m.form||""))w.push("Section I note S1: not current practice at 450 °C and above");
+ return{S:S,Sy:ovY>0?ovY:(isFinite(m.sy)?m.sy*MPA:NaN),ch:m.ch,warn:w.join("; "),src:src,note:m.note||"",ln:m.ln}}
+/* modulus of elasticity, Table TM-1, carbon steels C <= 0.30 % (GPa) */
+function Etm(TC){return interp([25,100,150,200,250,300,350,400,450,500,550],[202,198,195,192,189,185,179,171,162,151,137],TC)*1000}
+var TG={"4":[[2.2,0.0959],[2.6,0.0884],[3.0,0.0839],[4.0,0.0783],[5.0,0.0759],[7.0,0.0739],[10.0,0.0729],[30.0,0.072],[50.0,0.072]],"5":[[1.4,0.0929],[1.6,0.0802],[2.0,0.0658],[2.4,0.0586],[3.0,0.0532],[4.0,0.0494],[5.0,0.0478],[7.0,0.0465],[10.0,0.0459],[30.0,0.0454],[50.0,0.0453]],"6":[[1.2,0.0837],[1.6,0.0584],[2.0,0.0469],[2.4,0.0411],[3.0,0.0369],[4.0,0.0341],[5.0,0.0329],[7.0,0.032],[10.0,0.0316],[30.0,0.0312],[50.0,0.0312]],"8":[[0.74,0.0968],[0.8,0.0875],[1.0,0.066],[1.6,0.0372],[2.0,0.0285],[2.4,0.0242],[3.0,0.0212],[4.0,0.0192],[5.0,0.0184],[7.0,0.0179],[10.0,0.0176],[20.0,0.0174],[50.0,0.0174]],"10":[[0.56,0.0964],[0.7,0.072],[1.0,0.0463],[1.2,0.0371],[2.0,0.0201],[2.4,0.0165],[3.0,0.0139],[4.0,0.0124],[5.0,0.0118],[7.0,0.0114],[10.0,0.0112],[16.0,0.0111],[50.0,0.0111]],"15":[[0.34,0.0968],[0.4,0.077],[0.6,0.0453],[1.0,0.0244],[1.2,0.0197],[2.0,0.0109],[2.4,0.0089],[3.0,0.00691],[4.0,0.00573],[5.0,0.00534],[6.0,0.00516],[10.0,0.00497],[40.0,0.0049],[50.0,0.0049]],"20":[[0.24,0.0982],[0.4,0.0477],[0.6,0.0286],[0.8,0.0203],[1.0,0.0156],[1.2,0.0127],[2.0,0.00713],[3.0,0.00446],[3.4,0.00388],[4.0,0.00342],[5.0,0.00308],[7.0,0.00287],[10.0,0.0028],[40.0,0.00275],[50.0,0.00275]],"25":[[0.2,0.0877],[0.3,0.0484],[0.5,0.025],[0.8,0.0143],[1.0,0.0111],[1.2,0.00902],[2.0,0.00508],[3.0,0.00323],[3.4,0.00278],[4.0,0.00235],[4.4,0.00219],[5.0,0.00204],[6.0,0.00191],[7.0,0.00186],[10.0,0.0018],[30.0,0.00176],[50.0,0.00176]],"30":[[0.16,0.0904],[0.2,0.0635],[0.3,0.0357],[0.4,0.0246],[0.6,0.015],[0.8,0.0108],[1.0,0.00838],[1.2,0.00683],[2.0,0.00388],[3.0,0.00246],[4.0,0.00177],[4.4,0.00161],[5.0,0.00147],[6.0,0.00136],[7.0,0.0013],[10.0,0.00125],[30.0,0.00122],[50.0,0.00122]],"40":[[0.12,0.0864],[0.2,0.0385],[0.3,0.0222],[0.4,0.0155],[0.6,0.00958],[0.8,0.00691],[1.0,0.00539],[1.2,0.00441],[2.0,0.00252],[4.0,0.00117],[5.0,0.000912],[6.0,0.000804],[7.0,0.000756],[8.0,0.000731],[10.0,0.000708],[16.0,0.000692],[40.0,0.000688],[50.0,0.000688]],"50":[[0.088,0.093],[0.1,0.0782],[0.2,0.0263],[0.3,0.0154],[0.4,0.0108],[0.6,0.00677],[0.8,0.0049],[1.0,0.00384],[2.0,0.00181],[4.0,0.000842],[5.0,0.000652],[6.0,0.000548],[7.0,0.000502],[8.0,0.000478],[10.0,0.000458],[12.0,0.000449],[16.0,0.000444],[40.0,0.00044],[50.0,0.00044]],"60":[[0.074,0.0954],[0.1,0.0556],[0.14,0.0323],[0.2,0.0193],[0.4,0.00812],[0.6,0.0051],[0.8,0.00371],[1.0,0.00291],[2.0,0.00138],[3.0,0.000886],[4.0,0.000645],[6.0,0.000409],[7.0,0.000364],[8.0,0.000341],[10.0,0.000322],[14.0,0.00031],[40.0,0.000306],[50.0,0.000306]],"80":[[0.054,0.099],[0.07,0.0608],[0.09,0.0391],[0.1,0.0328],[0.14,0.0196],[0.2,0.012],[0.24,0.0095],[0.4,0.00516],[0.6,0.00328],[0.8,0.00239],[1.0,0.00188],[2.0,0.000895],[4.0,0.000424],[6.6,0.000241],[8.0,0.000205],[10.0,0.000186],[14.0,0.000176],[30.0,0.000172],[50.0,0.000172]],"100":[[0.05,0.0741],[0.07,0.0398],[0.1,0.022],[0.14,0.0133],[0.2,0.00831],[0.4,0.00364],[0.5,0.00283],[0.8,0.0017],[1.0,0.00134],[2.0,0.000641],[4.0,0.000305],[6.0,0.000195],[8.0,0.000142],[10.0,0.000124],[14.0,0.000114],[25.0,0.00011],[50.0,0.00011]],"125":[[0.05,0.048],[0.06,0.0344],[0.08,0.021],[0.1,0.0148],[0.14,0.00917],[0.2,0.00578],[0.4,0.00257],[0.6,0.00165],[0.8,0.00121],[1.0,0.000955],[2.0,0.000459],[4.0,0.00022],[6.0,0.000141],[9.0,9.04e-05],[10.0,8.37e-05],[12.0,7.7e-05],[14.0,7.4e-05],[20.0,7.13e-05],[40.0,7.04e-05],[50.0,7.04e-05]],"150":[[0.05,0.0338],[0.06,0.0244],[0.08,0.0151],[0.1,0.0108],[0.12,0.00833],[0.16,0.00569],[0.2,0.00431],[0.4,0.00194],[0.6,0.00125],[1.0,0.000726],[2.0,0.000349],[4.0,0.000168],[6.0,0.000108],[8.0,7.87e-05],[10.0,6.19e-05],[12.0,5.53e-05],[16.0,5.1e-05],[20.0,4.98e-05],[40.0,4.89e-05],[50.0,4.89e-05]],"200":[[0.05,0.0196],[0.06,0.0143],[0.08,0.00909],[0.1,0.00659],[0.14,0.00421],[0.2,0.00272],[0.3,0.00171],[0.5,0.000976],[0.8,0.000592],[1.0,0.000469],[2.0,0.000227],[4.0,0.00011],[6.0,7.11e-05],[8.0,5.2e-05],[10.0,4.03e-05],[12.0,3.38e-05],[14.0,3.09e-05],[16.0,2.95e-05],[20.0,2.83e-05],[40.0,2.75e-05],[50.0,2.75e-05]],"250":[[0.05,0.0129],[0.06,0.00955],[0.08,0.00617],[0.1,0.00452],[0.14,0.00293],[0.2,0.00191],[0.4,0.000881],[0.6,0.000572],[0.8,0.000422],[1.0,0.000335],[2.0,0.000163],[4.0,7.89e-05],[6.0,5.13e-05],[8.0,3.77e-05],[10.0,2.93e-05],[12.0,2.38e-05],[14.0,2.1e-05],[16.0,1.96e-05],[20.0,1.84e-05],[40.0,1.76e-05],[50.0,1.76e-05]],"300":[[0.05,0.00923],[0.06,0.0069],[0.08,0.00452],[0.1,0.00334],[0.12,0.00264],[0.2,0.00143],[0.4,0.000666],[0.6,0.000433],[0.8,0.000321],[1.0,0.000254],[2.0,0.000124],[4.0,6.02e-05],[6.0,3.93e-05],[8.0,2.87e-05],[10.0,2.25e-05],[14.0,1.56e-05],[16.0,1.42e-05],[20.0,1.3e-05],[40.0,1.23e-05],[50.0,1.22e-05]],"400":[[0.05,0.00549],[0.06,0.00417],[0.08,0.00278],[0.1,0.00208],[0.12,0.00166],[0.16,0.00118],[0.2,0.000914],[0.4,0.000429],[0.6,0.00028],[0.8,0.000207],[1.0,0.000165],[2.0,8.08e-05],[4.0,3.93e-05],[6.0,2.57e-05],[8.0,1.89e-05],[10.0,1.48e-05],[14.0,1.02e-05],[16.0,8.82e-06]],"500":[[0.05,0.0037],[0.06,0.00284],[0.08,0.00192],[0.1,0.00145],[0.12,0.00116],[0.16,0.00083],[0.2,0.000645],[0.4,0.000305],[0.6,0.000199],[0.8,0.000148],[1.0,0.000118],[2.0,5.79e-05],[4.0,2.82e-05],[6.0,1.85e-05],[8.0,1.37e-05],[10.0,1.07e-05],[12.0,8.8e-06]],"600":[[0.05,0.0027],[0.06,0.00208],[0.08,0.00142],[0.1,0.00108],[0.12,0.000868],[0.16,0.000624],[0.2,0.000486],[0.4,0.000231],[0.6,0.000151],[0.8,0.000112],[1.0,8.94e-05],[2.0,4.39e-05],[4.0,2.16e-05],[6.0,1.41e-05],[8.0,1.04e-05],[8.4,9.88e-06]],"800":[[0.05,0.00165],[0.06,0.00129],[0.08,0.000892],[0.1,0.000682],[0.12,0.000551],[0.16,0.000398],[0.2,0.000312],[0.4,0.000149],[0.6,9.8e-05],[0.8,7.28e-05],[1.0,5.8e-05],[2.0,2.86e-05],[4.0,1.4e-05],[5.0,1.12e-05],[5.6,9.92e-06]],"1000":[[0.05,0.00113],[0.06,0.000891],[0.07,0.000733],[0.09,0.000541],[0.12,0.000388],[0.16,0.000282],[0.2,0.000221],[0.4,0.000106],[0.7,5.96e-05],[1.0,4.14e-05],[2.0,2.04e-05],[4.0,1.01e-05],[4.2,9.57e-06]]};
+var CSC={"CS-1":{"150":[[1.35e-05,1.38],[0.000645,64.8],[0.0007,68.3],[0.0008,72.4],[0.0009,75.2],[0.001,77.2],[0.0015,82.3],[0.002,84.8],[0.0095,95.1],[0.02,95.1],[0.1,95.1]],"260":[[1.43e-05,1.38],[0.000513,48.3],[0.0006,51.5],[0.0008,55.8],[0.001,58.6],[0.0015,64.5],[0.0025,68.6],[0.0195,90.3],[0.1,90.3]],"370":[[1.57e-05,1.38],[0.000413,35.4],[0.0005,38.3],[0.0006,40.0],[0.0007,42.1],[0.0008,43.4],[0.0009,44.8],[0.001,45.9],[0.0015,50.0],[0.002,52.4],[0.0212,75.8],[0.1,75.8]],"425":[[1.78e-05,1.38],[0.000367,28.7],[0.0004,30.0],[0.0005,32.1],[0.0006,33.4],[0.0007,35.2],[0.001,38.6],[0.0015,41.7],[0.002,44.1],[0.0225,67.2],[0.1,67.2]],"480":[[1.88e-05,1.38],[0.000331,24.1],[0.0005,27.2],[0.0007,29.6],[0.001,32.5],[0.0015,35.6],[0.0025,39.6],[0.0213,58.6],[0.1,58.6]]},"CS-2":{"150":[[1.76e-05,1.72],[0.000783,77.9],[0.0008,78.6],[0.0009,81.4],[0.001,84.8],[0.002,103.0],[0.003,112.0],[0.004,116.0],[0.005,119.0],[0.025,121.0],[0.1,121.0]],"260":[[1.94e-05,1.72],[0.000675,62.1],[0.0009,66.5],[0.001,68.9],[0.0025,82.7],[0.003,85.5],[0.008,97.9],[0.01,101.0],[0.015,107.0],[0.02,111.0],[0.028,117.0],[0.1,117.0]],"370":[[2.13e-05,1.72],[0.000564,46.9],[0.001,55.2],[0.003,69.6],[0.01,83.4],[0.0264,95.1],[0.1,95.1]],"425":[[2.23e-05,1.72],[0.000505,39.4],[0.001,49.0],[0.0015,54.8],[0.002,57.9],[0.003,61.4],[0.0319,85.5],[0.1,85.5]],"480":[[2.37e-05,1.72],[0.000428,31.0],[0.001,41.4],[0.0015,46.9],[0.002,50.7],[0.003,54.5],[0.008,63.4],[0.03,76.5],[0.1,76.5]]}};
+var STSAT=[[1,99.61,417.4,2674.9,958.6,0.59,282.8,12.22],[2,120.21,504.7,2706.2,942.9,1.129,231.6,12.93],[3,133.53,561.5,2724.9,931.8,1.651,206.9,13.39],[4,143.61,604.7,2738.1,922.9,2.163,191.3,13.74],[5,151.84,640.2,2748.1,915.3,2.668,180.2,14.02],[6,158.83,670.5,2756.1,908.6,3.169,171.8,14.26],[7,164.95,697.1,2762.7,902.6,3.666,165.0,14.47],[8,170.41,721.0,2768.3,897.0,4.161,159.4,14.66],[9,175.36,742.7,2773.0,891.9,4.654,154.6,14.83],[10,179.89,762.7,2777.1,887.1,5.145,150.5,14.98],[11,184.07,781.2,2780.7,882.6,5.636,146.9,15.12],[12,187.96,798.5,2783.8,878.3,6.126,143.7,15.26],[13,191.61,814.8,2786.5,874.3,6.615,140.8,15.38],[14,195.05,830.1,2788.9,870.4,7.104,138.2,15.5],[15,198.3,844.7,2791.0,866.6,7.593,135.8,15.61],[16,201.38,858.6,2792.9,863.1,8.082,133.6,15.71],[17,204.31,871.9,2794.5,859.6,8.571,131.6,15.81],[18,207.12,884.6,2796.0,856.2,9.061,129.7,15.91],[19,209.81,896.8,2797.3,853.0,9.551,128.0,16.0],[20,212.38,908.6,2798.4,849.8,10.042,126.4,16.09],[21,214.87,920.0,2799.4,846.7,10.534,124.8,16.18],[22,217.26,931.0,2800.2,843.7,11.026,123.4,16.26],[23,219.56,941.6,2800.9,840.8,11.519,122.0,16.34],[24,221.8,952.0,2801.5,837.9,12.013,120.7,16.42],[25,223.96,962.0,2802.0,835.1,12.508,119.5,16.49],[26,226.05,971.7,2802.5,832.4,13.004,118.3,16.57],[27,228.09,981.2,2802.8,829.7,13.502,117.2,16.64],[28,230.06,990.5,2803.0,827.0,14.0,116.2,16.71],[29,231.99,999.5,2803.2,824.4,14.5,115.1,16.78],[30,233.86,1008.4,2803.3,821.9,15.001,114.2,16.84],[31,235.68,1017.0,2803.3,819.4,15.503,113.2,16.91],[32,237.46,1025.5,2803.2,816.9,16.006,112.3,16.97],[33,239.2,1033.7,2803.1,814.5,16.511,111.5,17.03],[34,240.9,1041.8,2803.0,812.1,17.018,110.6,17.09],[35,242.56,1049.8,2802.7,809.7,17.526,109.8,17.16],[36,244.19,1057.6,2802.5,807.4,18.035,109.0,17.21],[37,245.78,1065.2,2802.1,805.1,18.547,108.3,17.27],[38,247.33,1072.8,2801.8,802.8,19.059,107.5,17.33],[39,248.86,1080.2,2801.4,800.6,19.574,106.8,17.39],[40,250.36,1087.4,2800.9,798.4,20.09,106.1,17.44],[41,251.83,1094.6,2800.4,796.2,20.608,105.4,17.5],[42,253.27,1101.6,2799.9,794.0,21.127,104.8,17.55],[43,254.68,1108.6,2799.3,791.8,21.648,104.2,17.61],[44,256.07,1115.4,2798.7,789.7,22.172,103.5,17.66],[45,257.44,1122.1,2798.0,787.6,22.697,102.9,17.71]];/*P bar abs,Tsat C,hf,hg kJ/kg,rho_f,rho_g kg/m3,mu_f,mu_g uPa.s*/
+var STLIQ=[[10,42.0,999.7,1306.0,4.196],[20,83.9,998.2,1001.6,4.185],[30,125.7,995.6,797.2,4.18],[40,167.5,992.2,652.7,4.179],[50,209.3,988.0,546.5,4.18],[60,251.2,983.2,466.0,4.183],[70,293.0,977.7,403.5,4.188],[80,334.9,971.8,354.0,4.196],[90,377.0,965.3,314.2,4.205],[100,419.1,958.4,281.6,4.217],[110,461.4,950.9,254.6,4.23],[120,503.8,943.1,232.0,4.246],[130,546.4,934.8,212.9,4.265],[140,589.2,926.1,196.6,4.286],[150,632.3,917.0,182.6,4.31],[160,675.6,907.5,170.4,4.338],[170,719.2,897.5,159.8,4.369],[180,763.2,887.0,150.4,4.406],[190,807.6,876.1,142.0,4.447],[200,852.4,864.7,134.6,4.494],[210,897.7,852.7,127.9,4.548],[220,943.6,840.2,121.8,4.611],[230,990.2,827.1,116.2,4.683],[240,1037.5,813.4,111.1,4.767],[250,1085.7,798.9,106.3,4.865],[260,1134.8,783.6,101.8,4.981],[270,1185.1,767.5,97.6,5.119],[280,1236.7,750.3,93.5,5.286],[290,1289.8,731.9,89.7,5.492],[300,1344.8,712.1,85.9,5.752]];/*T C,h kJ/kg,rho,mu uPa.s,cp kJ/kgK (saturated liquid)*/
+function lgi(x0,y0,x1,y1,x){if(x1===x0)return y0;return Math.exp(Math.log(y0)+(Math.log(y1)-Math.log(y0))*(Math.log(x)-Math.log(x0))/(Math.log(x1)-Math.log(x0)))}
+function Ag(pts,Dt,LD){var n=pts.length;if(LD<pts[0][0]*0.9999)return NaN;if(LD>=pts[n-1][0]){if(pts[n-1][0]>=50)return pts[n-1][1];var Ai=1.1/(Dt*Dt);return pts[n-1][1]>Ai?lgi(pts[n-1][0],pts[n-1][1],50,Ai,LD):pts[n-1][1]}
+ for(var i=1;i<n;i++)if(LD<=pts[i][0])return lgi(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1],LD);return NaN}
+var TGK=Object.keys(TG).map(parseFloat).sort(function(a,b){return a-b});
+function Atab(Dt,LD){LD=Math.min(50,Math.max(.05,LD));if(!(Dt>=TGK[0]&&Dt<=TGK[TGK.length-1]))return NaN;
+ var lo=TGK[0],hi=TGK[TGK.length-1];for(var i=0;i<TGK.length;i++){if(TGK[i]<=Dt)lo=TGK[i];if(TGK[i]>=Dt){hi=TGK[i];break}}
+ var a=Ag(TG[lo],lo,LD),b=Ag(TG[hi],hi,LD);if(lo===hi)return a;if(!ok(a)||!ok(b))return NaN;return lgi(lo,a,hi,b,Dt)}
+/* Fig. CS-1 / CS-2, Table CS-1 / CS-2: B (MPa) from A at a temperature (deg C) */
+var CST=[150,260,370,425,480];
+function curveB(c,A){var n=c.length;if(A<=c[0][0])return c[0][1]*A/c[0][0];if(A>=c[n-1][0])return c[n-1][1];for(var i=1;i<n;i++)if(A<=c[i][0]){var f=Math.log(A/c[i-1][0])/Math.log(c[i][0]/c[i-1][0]);return c[i-1][1]+f*(c[i][1]-c[i-1][1])}return NaN}
+function Bchart(ch,TC,A){var C=CSC[ch==="CS-1"?"CS-1":"CS-2"];if(!ok(A)||!ok(TC)||TC>CST[CST.length-1])return NaN;if(TC<=CST[0])return curveB(C[CST[0]],A);
+ for(var i=1;i<CST.length;i++)if(TC<=CST[i]){var b0=curveB(C[CST[i-1]],A),b1=curveB(C[CST[i]],A);return b0+(b1-b0)*(TC-CST[i-1])/(CST[i]-CST[i-1])}return NaN}
+function Ainv(ch,TC,B){if(!ok(B)||B<=0)return NaN;var best=NaN,prevA=1e-6,prevB=Bchart(ch,TC,prevA);if(prevB>=B)return 1e-6*B/prevB;
+ for(var k=1;k<=1200;k++){var A=1e-6*Math.pow(1e5,k/1200),Bk=Bchart(ch,TC,A);if(Bk>=B){return prevA+(A-prevA)*(B-prevB)/(Bk-prevB)}prevA=A;prevB=Bk}return NaN}
+function furnace(s){var te=s.ft-s.fCA,Dt=s.fDo/te,LD=Math.min(50,Math.max(.05,s.fL/s.fDo)),Af=Atab(Dt,LD),A=s.fAc>0?s.fAc:Af,Bt=Bchart(s.chF,s.Tfu,A),B=s.fBm>0?s.fBm:Bt;
+ return{te:te,Dt:Dt,LD:LD,E:Etm(s.Tfu),Af:Af,A:A,Bt:Bt,B:B,Pa:4*B*MPA/(3*Dt)}}
+function tubeCalc(s,o){var ch=(MAT[o.mat]||MAT.Custom).ch,Dt=o.Do/o.t,LD=Math.min(50,o.L/o.Do),Af=Atab(Dt,LD),A=o.Ac>0?o.Ac:Af,Bt=Bchart(ch,s.Ttu,A),B=o.Bm>0?o.Bm:Bt;
+ return{Dt:Dt,LD:LD,E:Etm(s.Ttu),Af:Af,A:A,B:B,Pa:4*B*MPA/(3*Dt),ch:ch}}
+function nozSn(s,o){return matInfo(o.mat,s.Tsh,o.ovS).S}
+function nozCalc(s,o){var Sn=nozSn(s,o),te=s.tsh-s.C,tne=o.tn*o.kt,d=o.OD-2*tne,tr=s.P*(s.ID/2+s.C)/(s.S-(1-s.y)*s.P),trn=s.P*(d/2)/(Sn-(1-s.y)*s.P),
+ F=1-.5*Math.pow(Math.sin(o.th*Math.PI/180),2),fr1=Math.min(1,Sn/s.Sv),fr2=Math.min(1,Math.min(Sn,s.Sp)/s.Sv),fr3=Math.min(1,s.Sp/s.Sv),
+ A=d*tr*F+2*tne*tr*F*(1-fr1),x=te-F*tr,A1=Math.max(Math.max(0,d*x-2*tne*x*(1-fr1)),Math.max(0,2*(te+tne)*x-2*tne*x*(1-fr1))),
+ A2=Math.min(5*(tne-trn)*fr2*te,5*(tne-trn)*fr2*tne),A2p=Math.min(5*(tne-trn)*fr2*te,2*(tne-trn)*(2.5*tne+s.tp)*fr2),
+ A3=o.h>0?Math.min(5*te*tne*fr2,5*tne*tne*fr2,2*o.h*tne*fr2):0,A41=o.WL1*o.WL1*fr2,A43=o.h>0?o.WL3*o.WL3*fr2:0,Av0=A1+A2+A3+A41+A43,lmt=2*Math.max(d,d/2+tne+te),
+ Dp=o.Dp>0?o.Dp:((s.nzAuto&&Av0<A)?o.OD+120:0),Dpe=Math.min(Dp,lmt),A42=s.WL2*s.WL2*fr3,A5=Dp>0?Math.max(0,(Dpe-d-2*tne)*s.tp*fr3):0,Av1=Dp>0?A1+A2p+A3+A41+A43+A42+A5:0,Sh=Math.max(0,A-Av0),Dpr=Av0>=A?0:d+2*tne+Sh/(s.tp*fr3);
+ var st,cls;if(!ok(A)||!ok(Av0)){st="CHECK INPUT";cls="fail"}else if(Av0>=A){st="PASS no pad";cls="pass"}else if(Dp>0){if(Av1>=A){st="PASS with pad";cls="pass"}else{st="FAIL";cls="fail"}}else{st=Dpr>lmt?"FAIL pad > limit":"PAD REQ'D";cls="fail"}
+ return{Sn:Sn,tr:tr,trn:trn,d:d,F:F,A:A,A1:A1,A2:A2,A3:A3,A41:A41+A43,Av0:Av0,m0:(Av0/A-1)*100,lmt:lmt,Dp:Dp,Av1:Av1,m1:Dp>0?(Av1/A-1)*100:NaN,Dpr:Dpr,st:st,cls:cls,
+  pad:Av0>=A?"none":("OD "+(Dp>0?fmt(Dp,0)+" provided":"≥ "+fmt(Math.max(Math.ceil(Dpr/10)*10,o.OD+120),0)+" suggested")+" x "+s.tp+"t")}}
+var SF={};
+SF.shell=function(id,n,tt){var o={id:"s2",n:"2",title:"Boiler shell",ref:"PG-27.2.2 · PG-16.3",
+ fields:[["ID","Shell inside diameter, ID","mm"],["E","Joint efficiency, E","","1.00 only with full RT stated"],["y","Temperature coefficient, y","","PG-27.4.6, ferritic ≤ 900 °F"],["C","Corrosion / structural allowance, C","mm"],["tmin","Minimum plate thickness","mm","PG-16.3"],["tsh","Shell thickness selected","mm"]],
+ calc:function(s){var Rr=s.ID/2+s.C,treq=s.P*Rr/(s.S*s.E-(1-s.y)*s.P)+s.C,mawp=s.S*s.E*(s.tsh-s.C)/(Rr+(1-s.y)*(s.tsh-s.C));
+  return{lines:[FM("t = P.R / (S.E − (1 − y).P) + C")],rows:[R("Allowable stress, S",s.S,"psi",0),R("Inside radius plus C, R (PG-27.3, 2025)",Rr,"mm",1),R("t required",treq,"mm",2,1),R("t selected",s.tsh,"mm",1),R("Shell MAWP at selected thickness",mawp,"psi",1)],
+   verdict:pf(s.tsh>=treq&&s.tsh-s.C>=s.tmin&&mawp>=s.P,"t selected ≥ t required and minimum","check t, minimum or MAWP")}}};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+SF.endp=function(id,n,tt){var o={id:"s4",n:"4",title:"Furnace rear head, flat plate stayed to rear tubeplate",ref:"PG-46.1 · PG-31.3.1",
+ fields:[["emode","Method","sel","",[["1","4a  Stayed plate, PG-46.1 (stay rods fitted)"],["2","4b  Unstayed flat plate, PG-31 (no stays)"]]],["eCA","Corrosion allowance","mm"],["et","Plate thickness provided","mm"],
+  ["e1p","4a  Maximum stay pitch, p","mm"],["e1C","4a  Stayed-plate factor, C","","plate thicker than 7/16 in"],
+  ["e2d","4b  Plate diameter, d","mm"],["e2C","4b  Attachment factor C (Fig. PG-31 sketch)","","pick the sketch that matches the weld detail"]],
+ calc:function(s){var st=String(s.emode)==="2"?2:1,r=st===1?s.e1p*Math.sqrt(s.P/(s.Spl*s.e1C))+s.eCA:s.e2d*Math.sqrt(s.e2C*s.P/s.Spl)+s.eCA,
+  rows=[R("Allowable stress, S",s.Spl,"psi",0),st===1?R("4a  t required = p.√(P/(S.C)) + CA",r,"mm",2,1):R("4b  t required = d.√(C.P/S) + CA",r,"mm",2,1),R("Thickness provided",s.et,"mm",2)];
+  return{rows:rows,verdict:s.et>=r?V("pass","PASS  plate thickness ≥ required"):V("fail","FAIL  plate thinner than required")}}};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+SF.plate=function(id,n,title,p){return {id:id,n:n,title:title,ref:"PG-46.1 · PFT-31 · PG-16.3",
+ fields:[[p+"_t","Tubeplate thickness provided","mm"],[p+"_CA","Corrosion allowance","mm"],[p+"_C","Stayed-plate factor, C","","plate thicker than 7/16 in"],[p+"_p","Pitch between stays / tube-nest edges, p","mm"],[p+"_Dl","Largest unsupported circle in the lane, Dl","mm","measure on the tubeplate drawing"],
+  [p+"_e","Max. distance, stay centre to tube-hole edge, e","mm"],[p+"_d","Stay-tube OD deducted, d","mm"],[p+"_D1","Circle 1 diameter (0 = not used)","mm"],[p+"_D2","Circle 2 diameter","mm"],[p+"_D3","Circle 3 diameter","mm"],[p+"_D4","Circle 4 diameter","mm"],[p+"_D5","Circle 5 diameter","mm"],[p+"_D6","Circle 6 diameter","mm"],[p+"_tm","Minimum thickness, stayed plate","mm","PG-16.3"]],
+ calc:function(s){var C=s[p+"_C"],CA=s[p+"_CA"],t=s[p+"_t"],Sx=s.Stp,pu=Math.max(s[p+"_p"],s[p+"_Dl"]/Math.SQRT2),tl=pu*Math.sqrt(s.P/(Sx*C))+CA,pa=(t-CA)*Math.sqrt(Sx*C/s.P),rows=[R("Allowable stress, S",Sx,"psi",0)],tq=tl;
+  rows.push(R("Governing pitch, larger of p and Dl/√2",pu,"mm",1));rows.push(R("t required, lane  p.√(P/(S.C)) + CA",tl,"mm",2));rows.push(R("p allow = (t − CA).√(S.C/P)",pa,"mm",1));
+  [1,2,3,4,5,6].forEach(function(i){var D=s[p+"_D"+i];if(D>0){var tc=Math.sqrt(s.P/(Sx*C)*(Math.pow(D/Math.SQRT2,2)-Math.PI*Math.pow(s[p+"_d"],2)/4))+CA;tq=Math.max(tq,tc);rows.push(R("t required, circle "+i+" (Ø"+D+")",tc,"mm",2))}});
+  rows.push(R("t required, governing",tq,"mm",2,1));rows.push(R("Utilisation, t required / t provided",tq/t,"",2,1));
+  return{lines:[FM("lane:  t = p.√(P/(S.C)) + CA        circles:  t = √( P/(S.C).(p² − π.d²/4) ) + CA,  p = D/√2")],rows:rows,verdict:pf(t>=tq&&t-CA>=s[p+"_tm"]&&s[p+"_e"]<=pa,"utilisation "+fmt(tq/t,2),"thickness, minimum or distance e not satisfied")}}}};
+SF.tubes=function(id,n,tt){var o={id:"s7",n:"7",title:"Tubes under external pressure",ref:"PG-28.3.1",table:"T"};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+SF.gussetL=function(id,n,tt){var o={id:"s9",n:"9",title:"Gusset stays (plates along the boiler length)",ref:"PFT-32 · PG-49.1",
+ fields:[["gson","Gusset stays in use","flag"],["H9","Max. distance, top row of tubes to shell, H","mm"],["dd9","Deduction in segment formula, d","in"],["W9","Gusset plate thickness, all sizes","mm"],["gB9","Gusset plate width, all sizes","mm","section across the plate, perpendicular to its length"],
+  ["gna9","Size A: number per tubeplate (left + right)","nos"],["gLa9","Size A: length along the boiler","mm"],["gnb9","Size B: number per tubeplate","nos"],["gLb9","Size B: length along the boiler","mm"],["gnc9","Size C: number per tubeplate","nos"],["gLc9","Size C: length along the boiler","mm"],
+  ["k9","Factor on allowable stress","","PFT-32.2, valid when L ≤ 1.15 l"]],
+ calc:function(s){if(!s.gson)return{rows:[],verdict:V("na","N/A  not used")};var H=s.H9/25.4,Rr=s.ID/2/25.4,nt=s.gna9+s.gnb9+s.gnc9,A=4*Math.pow(H-s.dd9,2)/3*Math.sqrt(2*Rr/(H-s.dd9)-.608),a=1.1*A*s.P/(s.k9*nt*s.Spl),ag=s.W9/25.4*s.gB9/25.4,Pa=s.k9*nt*ag*s.Spl/(1.1*A);
+  return{lines:[FM("A = 4.(H − d)²/3 . √( 2R/(H − d) − 0.608) ;  a = 1.10.A.P / (k.n.S) ;  ag = thickness x width"),FM("the segment load is shared equally by all gussets; the load runs along the plate length, so the section is thickness x width")],
+   rows:[R("Allowable stress, S",s.Spl,"psi",0),R("Segment area to be stayed, A",A,"in²",1),R("Number of gussets per tubeplate, n",nt,"",0),R("a required, per gusset",a,"in²",3),R("ag provided, thickness x width",ag,"in²",2),R("Size A / B / C lengths",s.gLa9+" / "+s.gLb9+" / "+s.gLc9,"mm",0),R("Allowable pressure, Pa",Pa,"psi",1,1)],
+   verdict:pf(ag>=a&&Pa>=s.P&&nt>0,"Pa = "+fmt(Pa,1)+" psi","ag or Pa below requirement")}}};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+SF.stay=function(id,n,tt){var o={id:"s8",n:"8",title:"Stay rods",ref:"PG-49.1",
+ fields:[["sron","Stay rods in use","flag"],["d8","Rod diameter, d","mm"],["dh8","Telltale hole diameter","mm"],["p8","Pitch of stay rods, p","mm"],["Ls8","Length of rod between plates","mm"],["sup8","Rod supported at intervals not over 120 d (PG-46.8, only needed if Ls / d is above 120)","flag"]],
+ calc:function(s){if(!s.sron)return{rows:[],verdict:V("na","N/A  not used")};var W=s.P*Math.pow(s.p8/25.4,2),Ar=1.1*W/s.S8,Ap=Math.PI/4*(s.d8*s.d8-s.dh8*s.dh8)/645.16,sl=s.Ls8/s.d8,longOK=sl<=120||!!s.sup8||Ap>=1.15*Ar;
+  return{lines:[FM("W = P.p² ;  required area = 1.10.W / S")],rows:[R("Allowable stress, S",s.S8,"psi",0),R("Load on one stay, W",W,"lb",0),R("Required area",Ar,"in²",3),R("Provided area, π/4.(d² − dh²)",Ap,"in²",3),R("Stress in rod, 1.10.W / A",1.1*W/Ap,"psi",0,1),R("Pitch, p vs 15 d (guide, source not verified)",s.p8+" vs "+fmt(15*s.d8,0),"mm",0,s.p8>15*s.d8?2:0),R("PG-46.8: slenderness Ls / d (above 120 needs support or +15% area)",s.Ls8/s.d8,"",1,sl>120&&!longOK?2:0)].concat(sl>120?[R("PG-46.8: area provided / required (need 1.15 if unsupported)",Ap/Ar,"",2,0)]:[]).concat((s.emode!==undefined&&String(s.emode)!=="2")?[R("Rod pitch vs. end-plate pitch (4a), must not exceed",s.p8+" vs "+s.e1p,"mm",0,s.p8>s.e1p?2:0)]:[]),
+   verdict:pf(Ap>=Ar&&longOK&&!((s.emode!==undefined&&String(s.emode)!=="2")&&s.p8>s.e1p),"rod stress "+fmt(1.1*W/Ap,0)+" psi"+(s.p8>15*s.d8?" (pitch above 15 d: check)":"")+(sl>120?" (PG-46.8 met)":""),"area, slenderness (PG-46.8) or pitch not satisfied")}}};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+SF.gusset=function(id,n,tt){var o={id:"s9",n:"9",title:"Gusset stays",ref:"PFT-32 · PG-49.1",
+ fields:[["gson","Gusset stays in use","flag"],["H9","Max. distance, top row of tubes to shell, H","mm"],["dd9","Deduction in segment formula, d","in"],["n9","Number of gusset stays per tubeplate","sets"],["W9","Gusset plate thickness","mm"],["L9","Gusset depth at critical section","mm"],["k9","Factor on allowable stress","","PFT-32.2, valid when L ≤ 1.15 l"]],
+ calc:function(s){if(!s.gson)return{rows:[],verdict:V("na","N/A  not used")};var H=s.H9/25.4,Rr=s.ID/2/25.4,A=4*Math.pow(H-s.dd9,2)/3*Math.sqrt(2*Rr/(H-s.dd9)-.608),a=1.1*A*s.P/(s.k9*s.n9*s.Spl),ag=s.W9/25.4*s.L9/25.4,Pa=s.k9*s.n9*ag*s.Spl/(1.1*A);
+  return{lines:[FM("A = 4.(H − d)²/3 . √( 2R/(H − d) − 0.608) ;  a = 1.10.A.P / (k.n.S)")],rows:[R("Allowable stress, S",s.Spl,"psi",0),R("Segment area to be stayed, A",A,"in²",1),R("a required",a,"in²",3),R("ag provided, W x L",ag,"in²",2),R("Allowable pressure, Pa",Pa,"psi",1,1)],verdict:pf(ag>=a&&Pa>=s.P,"Pa = "+fmt(Pa,1)+" psi","ag or Pa below requirement")}}};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+SF.hydro=function(id,n,tt){var o={id:"s11",n:"11",title:"Hydrostatic test",ref:"PG-99",fields:[],calc:function(s){var m=1.5*s.P*(s.ID/2+.6*s.tsh)/(s.E*s.tsh);return{lines:[FM("σ = Pt.(R + 0.6 t) / (E.t)  ≤  0.9 Sy")],rows:[R("Test pressure",1.5*s.P,"psi",1),R("Shell membrane stress",m,"psi",0,1),R("Limit, 0.9 Sy",.9*s.Sy,"psi",0)],verdict:pf(m<=.9*s.Sy,"membrane stress within 0.9 Sy","membrane stress above 0.9 Sy")}}};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+SF.nozzle=function(id,n,tt){var o={id:"s12",n:"12",title:"Nozzle reinforcement, all openings calculated",ref:"PG-33 · no PG-32 exemption",table:"N"};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+function manhole(s){var d=s.mhA+s.mhR,D=s.mhB+s.mhR,Z=Math.min(2.5,3.4-2.4*d/D);return{d:d,D:D,Z:Z,tr:d*Math.sqrt(Z*s.mhC*s.P/s.Spl)+s.mhCA}}
+SF.manhole=function(id,n,tt){var o={id:"s13",n:"13",title:"Manhole cover",ref:"PG-31.3.3 · PG-44",
+ fields:[["mhA","Opening, short axis","mm"],["mhB","Opening, long axis","mm"],["mhR","Ring thickness","mm"],["mhC","Attachment factor, C","","internal cover seated on the ring"],["mhCA","Corrosion allowance, cover","mm"],["mht","Cover thickness provided","mm"]],
+ calc:function(s){var m=manhole(s);return{lines:[FM("t = d.√(Z.C.P/S) + CA ;  Z = 3.4 − 2.4.d/D  (not above 2.5)")],rows:[R("Allowable stress, S",s.Spl,"psi",0),R("d, short span at gasket line",m.d,"mm",1),R("D, long span at gasket line",m.D,"mm",1),R("Z",m.Z,"",3),R("t required",m.tr,"mm",2,1),R("t provided",s.mht,"mm",1)],
+  verdict:pf(s.mht>=m.tr&&Math.max(s.mhA,s.mhB)>=400&&Math.min(s.mhA,s.mhB)>=300,"cover thickness ≥ required, opening ≥ 400 x 300 mm","cover too thin or opening below 400 x 300 mm")}}};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+var B165={T:[38,50,100,150,200,250,300,325,350,375,400,425,450,475,500,538],
+ "150":[19.6,19.2,17.7,15.8,13.8,12.1,10.2,9.3,8.4,7.4,6.5,5.5,4.6,3.7,2.8,1.4],
+ "300":[51.1,50.1,46.6,45.1,43.8,41.9,39.8,38.7,37.6,36.4,34.7,28.8,23.0,17.4,11.8,5.9],
+ "400":[68.1,66.8,62.1,60.1,58.4,55.9,53.1,51.6,50.1,48.5,46.3,38.4,30.7,23.2,15.7,7.9],
+ "600":[102.1,100.2,93.2,90.2,87.6,83.9,79.6,77.4,75.1,72.7,69.4,57.5,46.0,34.9,23.5,11.8],
+ "900":[153.2,150.4,139.8,135.2,131.4,125.8,119.5,116.1,112.7,109.1,104.2,86.3,69.0,52.3,35.3,17.7],
+ "1500":[255.3,250.6,233.0,225.4,219.0,209.7,199.1,193.6,187.8,181.8,173.6,143.8,115.0,87.2,58.8,29.5]};
+function b165(cl,T){var a=B165[String(cl)],X=B165.T;if(!a||!(T===T))return NaN;if(T>X[X.length-1])return NaN;if(T<=X[0])return a[0];for(var k=1;k<X.length;k++)if(T<=X[k])return a[k-1]+(a[k]-a[k-1])*(T-X[k-1])/(X[k]-X[k-1]);return NaN}
+SF.handhole=function(id,n,tt){var o={id:"s14",n:"14",title:"Hand-hole blind flange",ref:"PG-42 · ASME B16.5-2013 Table 2-1.1",fields:[["hhC","Flange class","sel","",[["150","Class 150"],["300","Class 300"],["400","Class 400"],["600","Class 600"],["900","Class 900"],["1500","Class 1500"]]],["hhT","Flange design temperature (0 = shell design temperature)","°C","B16.5 Table 2-1.1: group 1.1, A105 / A515 Gr.70 / A516 Gr.70"]],
+ calc:function(s){var T=s.hhT>0?s.hhT:s.Tsh,R0=b165(s.hhC,T),mw=s.P/14.5038;return{lines:[FM("rating at temperature, linear interpolation in Table 2-1.1;  required: rating ≥ MAWP")],rows:[R("Flange class",String(s.hhC),"",0),R("Temperature used",T,"°C",0),R("Rating at temperature, B16.5",R0,"bar",1),R("Rating at temperature",R0*14.5038,"psi",0),R("MAWP",mw,"bar",2),R("Margin, rating / MAWP",R0/mw,"",2,1)],verdict:R0===R0?pf(R0>=mw,"rating "+fmt(R0,1)+" bar ≥ MAWP","rating below MAWP"):V("fail","FAIL  temperature outside Table 2-1.1")}}};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+var SFC={};
+SFC.s1=function(id,n,tt){var o={id:"s1",n:"1",title:"Design basis and materials",ref:"PG-99.1 · II-D 2025 Table 1A",
+ fields:[["P","Design pressure / MAWP, P","psi","10.34 bar at 150 psi"],["Q","Steam capacity, Q","kg/h"],["Tsh","Design metal temperature, shell and plates","°C","saturation at 10.3 bar is about 185 °C"],["Tfu","Design metal temperature, furnace","°C","fire-side plate temperature; chart curves 150, 260, 370, 425, 480"],["Ttu","Design metal temperature, tubes","°C"],["Ttp","Design metal temperature, tubeplates and stays","°C"],
+  ["mat_shell","Material, shell plate","mat"],["ov_shell","   Allowable stress override, shell (0 = II-D table)","psi"],["oy_shell","   Yield strength override, shell (0 = II-D table)","psi"],
+  ["mat_furn","Material, furnace plate","mat"],["mat_tp","Material, tubeplates","mat"],["ov_tp","   Allowable stress override, tubeplates","psi"],
+  ["mat_pl","Material, end plate, gusset and manhole cover","mat"],["ov_pl","   Allowable stress override, these plates","psi"],["mat_pad","Material, reinforcing pads","mat"],["ov_pad","   Allowable stress override, pads","psi"],
+  ["mat_stay","Material, stay rods","mat"],["ov_stay","   Allowable stress override, stay rods","psi"]],
+ calc:function(s){var m=s._m,row=function(l,x){return R(l,x.S,"psi",0)},rows=[R("Test pressure, 1.5 x MAWP",1.5*s.P/14.5038,"bar",2),R("Design pressure",s.P/14.5038,"bar",2)],
+  list=[["Shell",s.mat_shell,m.shell,s.Tsh],["Furnace",s.mat_furn,m.furn,s.Tfu],["Tubeplates",s.mat_tp,m.tp,s.Ttp],["End plate, gusset, cover",s.mat_pl,m.pl,s.Tsh],["Pads",s.mat_pad,m.pad,s.Tsh],["Stay rods",s.mat_stay,m.stay,s.Ttp]],w=[];
+  list.forEach(function(x){rows.push(R("S, "+x[0]+": "+x[1]+" at "+fmt(x[3],0)+" °C ("+x[2].src+")",x[2].S,"psi",0));rows.push(R("      = "+fmt(x[2].S/MPA,1)+" MPa · "+x[2].ln,"","",0));if(x[2].warn)w.push(x[0]+": "+x[2].warn)});
+  rows.push(R("Sy shell (minimum specified yield)",s.Sy,"psi",0));
+  rows.push(R("Furnace plate: chart for factor B",m.furn.ch,"",0));
+  var notes=[];list.forEach(function(x){if(x[2].note&&notes.indexOf(x[2].note)<0)notes.push(x[2].note)});
+  if(!ok(s.S)||!ok(s.Stp)||!ok(s.Spl)||!ok(s.Sp)||!ok(s.S8))w.push("a material needs an allowable stress value");
+  return{lines:[FM("S from Section II Part D (Metric) 2025, Table 1A, linear interpolation in temperature.")].concat(notes.map(function(t){return FM("Note: "+t)})),rows:rows,
+   verdict:w.length?V("fail","CHECK  "+w.join("; ")):V("pass","PASS  materials permitted for Section I at design temperature")}}};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+SFC.s3=function(id,n,tt){var o={id:"s3",n:"3",title:"Furnace under external pressure",ref:"PFT-15 · PFT-17 · PG-28.3 · II-D Fig. G, CS-1, CS-2",
+ fields:[["fDo","Furnace outside diameter, Do","mm"],["ft","Furnace plate thickness, t","mm"],["fCA","Corrosion allowance","mm"],["fLt","Furnace length, front tubeplate to rear end plate","mm"],["fnr","Number of stiffening rings (0 = plain furnace)","nos"],["fL","Design length L (PG-28.3: the largest of ring-to-ring, tubeplate-to-first-ring, ...)","mm","plain furnace: front tubeplate to the flat rear end plate (stayed to the rear tubeplate)"],
+  ["fAc","Factor A override (0 = Table G)","","leave 0 to read Table G"],["fBm","Factor B override (0 = Table CS-1/CS-2)","MPa","leave 0 to read the chart table"]],
+ calc:function(s){var f=furnace(s),rows=[R("Thickness used, te = t − CA",f.te,"mm",2),R("Uniform span, length / (rings + 1)",s.fLt/(s.fnr+1),"mm",0),R("Do / te",f.Dt,"",2),R("L / Do (limited to 50)",f.LD,"",3),
+   R("Factor A from Table G",f.Af,"",5),R("Factor A used",f.A,"",5,1),R("Chart for B",s.chF,"",0),R("Factor B from chart table at "+fmt(s.Tfu,0)+" °C",f.Bt,"MPa",1),R("Factor B used",f.B,"MPa",1,1),R("Factor B used",f.B*MPA,"psi",0),R("Pa, allowable external pressure",f.Pa,"psi",1,1),R("External pressure, P",s.P,"psi",1)];
+  var bad=[],lmax=Math.min(60*s.ft,900);
+  rows.push(R("PFT-15.1 / 17.5: minimum thickness 8 mm",s.ft>=8?"met":"NOT met","",0));if(s.ft<8)bad.push("furnace thinner than 8 mm (PFT-15.1)");
+  if(s.fnr>0){rows.push(R("PFT-17.6: ring spacing limit, smaller of 60 t and 900 mm",lmax,"mm",0));rows.push(R("PFT-17.6: design length L",s.fL,"mm",0));if(s.fL>lmax)bad.push("ring spacing above "+fmt(lmax,0)+" mm (PFT-17.6)")}
+  var good=f.Dt>=10&&f.Pa>=s.P&&bad.length===0&&ok(f.Pa);
+  return{lines:[FM("Pa = 4.B / ( 3.(Do/te) )     (Do/te ≥ 10)  PG-28.3.1.2(a)")],rows:rows,verdict:good?V("pass","PASS  Pa = "+fmt(f.Pa,1)+" psi > P = "+fmt(s.P,1)+" psi"):V("fail","FAIL  "+(bad.join(", ")||(!ok(f.Af)&&!(s.fAc>0)?"A is outside Table G: enter A manually":!ok(f.B)?"temperature above chart range (480 °C) or A missing":f.Dt<10?"Do/te below 10: use PG-28.3.1.2(b)":"Pa below design pressure")))}}};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+SFC.s31=function(id,n,tt){var o={id:"s31",n:"3.1",title:"Furnace stiffening ring",ref:"PFT-17.1 to 17.11 · PG-28.3",
+ fields:[["rb","Ring thickness Tr (along the axis)","mm"],["rh","Ring height Hr (radial)","mm"],["rLs","Ring spacing Ls (half the sum of the adjacent spans)","mm"],["rAc","Factor A override (0 = from chart at B)","","leave 0 to read the chart table"]],
+ calc:function(s){var f=furnace(s),As=s.rb*s.rh,we=1.1*Math.sqrt(s.fDo*f.te),Bq=s.P*s.fDo/(f.te+As/s.rLs),Ai=Ainv(s.chF,s.Tfu,Bq/MPA),A=s.rAc>0?s.rAc:Ai;
+  var Is=Math.pow(s.fDo,2)*s.rLs*(f.te+As/s.rLs)*A/14,A1=we*f.te,yc=(A1*f.te/2+As*(f.te+s.rh/2))/(A1+As);
+  var I=we*Math.pow(f.te,3)/12+A1*Math.pow(yc-f.te/2,2)+s.rb*Math.pow(s.rh,3)/12+As*Math.pow((f.te+s.rh/2)-yc,2),
+   tmx=Math.min(21,1.25*s.ft),hr=s.rh/s.rb,gb=[];
+  if(s.rb<8||s.rb>tmx)gb.push("ring thickness outside 8 mm to "+fmt(tmx,1)+" mm (PFT-17.2)");if(hr<3||hr>8)gb.push("Hr/Tr outside 3 to 8 (PFT-17.3)");
+  return{lines:[FM("B = P.Do / (t + As/Ls) ;  A read from the chart at B ;  Is = Do².Ls.(t + As/Ls).A / 14     (PFT-17.11.1)")],rows:[R("Ring area, As = Tr.Hr",As,"mm²",0),R("PFT-17.2: Tr limits, 8 mm to smaller of 21 mm and 1.25 t",tmx,"mm",1),R("PFT-17.3: Hr / Tr (3 to 8)",hr,"",2),R("Effective shell width, 1.10.√(Do.te)",we,"mm",1),R("B",Bq,"psi",0),R("B",Bq/MPA,"MPa",1),R("A used",A,"",5),
+   R("Required moment of inertia, Is",Is,"mm⁴",0,1),R("Shell strip area",A1,"mm²",0),R("Centroid from shell inner face",yc,"mm",1),R("Provided I, ring + shell strip",I,"mm⁴",0,1)],
+   verdict:!ok(A)?V("fail","FAIL  B is above the chart: reduce the ring spacing or enlarge the ring"):gb.length?V("fail","FAIL  "+gb.join("; ")):pf(I>=Is,"I = "+fmt(I,0)+" mm⁴ ≥ "+fmt(Is,0)+" mm⁴","provided inertia below required")}}};if(id)o.id=id;if(n)o.n=n;if(tt)o.title=tt;return o};
+var N_F=["tag","desc","size","mat","ovS","OD","tn","kt","h","WL1","WL3","th","Dp"];
+var T_F=["name","mat","n","Do","t","L","Ac","Bm"];
+var N_IN=[["tag","Opening no.","tx"],["desc","Designation","tx"],["size","Size","tx"],["mat","Nozzle material","mat"],["ovS","Allowable stress override (0 = from material)","num","psi"],["OD","Outside diameter of nozzle neck","num","mm"],["tn","Nozzle wall thickness, tn","num","mm"],["kt","Wall factor (0.875 = pipe under-tolerance)","num"],["h","Projection inside shell surface, h","num","mm"],["WL1","Outward nozzle weld size, WL1","num","mm"],["WL3","Inward nozzle weld size, WL3","num","mm"],["th","Plane angle from shell axis (Fig. PG-33.3)","num","deg"],["Dp","Pad OD, Dp (0 = none / auto)","num","mm"]];
+var N_OUT=[["grp","Result"],["st","Final result"],["pad","Pad requirement"],["grp","Required area"],["Sn","Allowable stress, nozzle, Sn","psi",0],["tr","tr, required thickness of seamless shell (E = 1)","mm",2],["trn","trn, required thickness of nozzle wall","mm",2],["d","d, finished opening diameter","mm",1],["F","F","",3],["A","A, area required","mm²",0],
+ ["grp","Available without pad"],["A1","A1, shell","mm²",0],["A2","A2, nozzle outward","mm²",0],["A3","A3, nozzle inward","mm²",0],["A41","A41 + A43, welds","mm²",0],["Av0","Total available, no pad","mm²",0],["m0","Margin, no pad (%)","",1],
+ ["grp","With pad"],["lmt","Limit of reinforcement along shell","mm",0],["Dp","Pad OD used","mm",0],["Av1","Total available, with pad","mm²",0],["m1","Margin, with pad (%)","",1],["Dpr","Pad OD required for strength","mm",0]];
+var T_IN=[["name","Tube group","tx"],["mat","Tube material","mat"],["n","Number of tubes (0 = not used)","num","nos"],["Do","Outside diameter, Do","num","mm"],["t","Wall thickness, t","num","mm"],["L","Length between tubeplates","num","mm"],["Ac","Factor A override (0 = Table G)","num"],["Bm","Factor B override (0 = chart table)","num","MPa"]];
+var T_OUT=[["st","Result"],["ch","Material chart for B"],["Dt","Do / t","",2],["LD","L / Do (limited to 50)","",2],["A","Factor A used","",5],["E","Modulus E, Table TM-1","MPa",0],["B","Factor B used","MPa",1],["Pa","Pa, allowable external pressure","psi",1]];
+function tubeRes(s,o){if(!(o.n>0))return{st:"N/A",cls:"na",ch:(MAT[o.mat]||MAT.Custom).ch};var c=tubeCalc(s,o),good=c.Dt>=10&&c.Pa>=s.P&&ok(c.Pa);return{st:good?"PASS":"FAIL",cls:good?"pass":"fail",ch:c.ch,Dt:c.Dt,LD:c.LD,A:c.A,E:c.E,B:c.B,Pa:c.Pa}}
+/* ---------- shared table configs (nozzles, tube groups) ---------- */
+var MODELS={},MORDER=["crf","cbd","cwt"];
+function tblN(defRows){return{key:"N",label:"opening",secId:"nz",F:N_F,DEF:defRows,IN:N_IN,OUT:N_OUT,min:1,
+ calcAll:function(s,a){return a.map(function(o){return nozCalc(s,o)})},
+ verdict:function(cs){var nf=cs.filter(function(c){return c.cls==="fail"}).length;return nf?V("fail","FAIL  "+nf+" of "+cs.length+" opening(s) not satisfied"):V("pass","PASS  all "+cs.length+" openings")},
+ tag:function(o,i){return o.tag||("#"+(i+1))},
+ onAdd:function(n,a){n.tag="N-"+a.length;n.Dp=0},onDup:function(n){n.tag=n.tag+"b"},
+ pdf:{head:["Opening","Designation","Size","Material","Neck OD","tn","d","A req.","A avail. (no pad)","Pad","Result"],resCol:10,
+  row:function(o,c){return[o.tag,o.desc,o.size,o.mat,fmt(o.OD,1),fmt(o.tn,2),fmt(c.d,1),fmt(c.A,0),fmt(c.Av0,0),c.pad,c.st]}}}}
+function tblT(defRows,addName){return{key:"T",label:"tube group",secId:"tb",F:T_F,DEF:defRows,IN:T_IN,OUT:T_OUT,min:1,
+ calcAll:function(s,a){return a.map(function(o){return tubeRes(s,o)})},
+ verdict:function(cs){var tf=cs.filter(function(c){return c.cls==="fail"}).length,tu=cs.filter(function(c){return c.cls!=="na"}).length;return tf?V("fail","FAIL  "+tf+" tube group(s) not satisfied"):(tu?V("pass","PASS  "+tu+" tube group(s)"):V("na","N/A  no tubes"))},
+ tag:function(o,i){return o.name||("Group "+(i+1))},
+ onAdd:function(n,a){n.name="Tube group "+(a.length+1)},onDup:function(n){n.name=n.name+" (copy)"},
+ pdf:{head:["Group","Material","Qty","Do","t","L","Do/t","A","B (MPa)","Pa (psi)","Result"],resCol:10,
+  row:function(o,c){return[o.name,o.mat,o.n,o.Do,o.t,o.L,fmt(c.Dt,1),fmt(c.A,5),fmt(c.B,1),fmt(c.Pa,1),c.st]}}}}
+
+/* heating surface and safety valve count, shared by CRF and CBD */
+SF.heat=function(id,n,furn){return{id:id,n:n,title:"Heating surface and safety valves",ref:"PG-101 · PG-67.1",
+ fields:[["hrc",furn?"Reversal chamber and tubeplate surfaces (from drawing)":"Other water-heating surface (from drawing, 0 if none)","m²"]],
+ calc:function(s,tb){var rows=[],HS=s.hrc;
+  if(furn){var fu=Math.PI*(s.fDo-2*s.ft)/1000*s.fLt/1000;rows.push(R("Furnace, fire side, π x ID x length",fu,"m²",2));HS+=fu}
+  tb.T.forEach(function(o){var a=o.n>0?Math.PI*(o.Do-2*o.t)/1000*o.L/1000*o.n:0;HS+=a;rows.push(R(o.name||"Tube group",a,"m²",2))});
+  var ft2=HS*10.7639,bhp=s.Q/15.65;
+  rows.push(R("Total heating surface",HS,"m²",2,1),R("Total heating surface",ft2,"ft²",0),R("Boiler horsepower, Q / 15.65",bhp,"BHP",1),R("Heating surface per BHP",ft2/bhp,"ft²/BHP",2),
+   R("Minimum number of pressure relief valves, PG-67.1 (more than 500 ft² / 47 m² of bare tube surface: two or more)",ft2>500?2:1,"nos",0,1));
+  return{lines:[FM("PG-67.1: a boiler with extended surface needs two valves only if the steaming capacity exceeds 1 800 kg/h. This sheet assumes bare tube.")],rows:rows,verdict:null}}}};
+
+function deriveFT(s){var a=matInfo(s.mat_shell,s.Tsh,s.ov_shell,s.oy_shell),b=matInfo(s.mat_tp,s.Ttp,s.ov_tp),c=matInfo(s.mat_pl,s.Tsh,s.ov_pl),d=matInfo(s.mat_pad,s.Tsh,s.ov_pad),e=matInfo(s.mat_stay,s.Ttp,s.ov_stay),
+ f=s.mat_furn?matInfo(s.mat_furn,s.Tfu,0):null;
+ s.S=a.S;s.Sy=a.Sy;s.Sv=a.S;s.Stp=b.S;s.Spl=c.S;s.Sp=d.S;s.S8=e.S;s.chF=f?f.ch:"CS-2";s._m={shell:a,furn:f,tp:b,pl:c,pad:d,stay:e};return s}
+
+/* ================= MODEL 1: CRF reversed-flame firetube boiler ================= */
+(function(){
+var DEF={P:147,Q:2000,Tsh:185,Tfu:245,Ttu:245,Ttp:245,
+ mat_shell:"SA-516 Gr.70",ov_shell:0,oy_shell:0,mat_furn:"SA-516 Gr.70",mat_tp:"SA-516 Gr.70",ov_tp:0,mat_pl:"SA-516 Gr.70",ov_pl:0,mat_pad:"SA-516 Gr.70",ov_pad:0,mat_stay:"SA-36 bar (stays)",ov_stay:0,
+ ID:1700,E:.95,y:.4,C:2,tmin:6,tsh:12,
+ fDo:874,ft:12,fCA:0,fLt:2900,fnr:5,fL:500,fAc:0,fBm:0,
+ rb:12,rh:80,rLs:490,rAc:0,
+ emode:"1",eCA:0,et:12,e1p:192,e1C:2.2,e2d:850,e2C:.33,
+ tf_C:2.2,tf_CA:2,tf_t:15,tf_p:150,tf_Dl:309,tf_e:100,tf_d:50.8,tf_D1:0,tf_D2:0,tf_D3:0,tf_D4:0,tf_D5:0,tf_D6:0,tf_tm:8,
+ tr_C:2.2,tr_CA:2,tr_t:15,tr_p:192,tr_Dl:309,tr_e:100,tr_d:50.8,tr_D1:0,tr_D2:0,tr_D3:0,tr_D4:0,tr_D5:0,tr_D6:0,tr_tm:8,
+ sron:1,sup8:0,d8:40,dh8:0,p8:192,Ls8:130,gson:1,H9:494,dd9:2,W9:15,gB9:100,gna9:2,gLa9:500,gnb9:2,gLb9:415,gnc9:2,gLc9:235,k9:.9,hrc:6,
+ nzAuto:1,tp:15,WL2:7,mhA:360,mhB:440,mhR:19,mhC:.3,mhCA:0,mht:25,hhC:"300",hhT:0};
+var NR=[["M-1","Manhole","440x360","SA-516 Gr.70",0,478,19,1,6,6,0,0,640],
+ ["N-1","Air vent","2in","SA-106 Gr.B",0,60.3,3.91,.875,6,6,0,0,0],["N-2","Main steam outlet","3in","SA-106 Gr.B",0,88.9,5.49,.875,6,6,0,0,0],
+ ["N-3","Safety valve","1-1/4in","SA-106 Gr.B",0,42.2,3.56,.875,6,6,0,0,0],["N-4","Safety valve","1-1/4in","SA-106 Gr.B",0,42.2,3.56,.875,6,6,0,0,0],
+ ["N-5","Water inlet","3in","SA-106 Gr.B",0,88.9,5.49,.875,6,6,0,0,0],["N-6","Water level control","1in","SA-106 Gr.B",0,33.4,3.38,.875,6,6,0,0,0],
+ ["N-7","Water level control","1in","SA-106 Gr.B",0,33.4,3.38,.875,6,6,0,0,0],["N-8","Blowdown","1in","SA-106 Gr.B",0,33.4,3.38,.875,6,6,0,0,0]];
+var TR=[["Fire tubes","SA-192",66,50.8,3.2,3000,0,0],["Stay tubes","SA-192",29,50.8,4,3000,0,0]];
+function nz(){var t=tblN(NR);return t}
+function tu(){var t=tblT(TR);return t}
+MODELS.crf={key:"crf",tab:"CRF",name:"Reversed-flame firetube boiler",title:"Reversed-Flame Boiler Calculation",
+ sub:"CRF · firetube steam boiler with plain furnace and stiffening rings · ASME BPVC Section I · inputs in psi, mm and °C",
+ pdfName:"Reversed-flame firetube boiler (CRF)",DEF:DEF,derive:deriveFT,
+ note:'<b>Example data.</b> Example data are taken from drawing CRF-150 (JOB 25-037, 10 bar). Check each yellow field against the drawing; replace each one with the project values; results update as you type. Choose materials in section 1: allowable stress, yield and the external-pressure chart follow the grade (ASME II-D 2025). Factors A and B are read from Table G and Table CS-1/CS-2. Add or remove nozzles in section 12 and tube groups in section 7.<br><b>Structure:</b> the furnace is welded to the front tubeplate only. Its rear end is closed by a flat end plate (section 4a) which is stayed by stay rods (section 8) to the rear tubeplate; it is not joined to the rear tubeplate. <b>Scope:</b> pressure parts only. The front and rear smoke boxes are not on the pressure-part drawing and are not calculated. Rename or zero any tube group that does not exist.<br><b>Code edition:</b> ASME BPVC Section I 2025; allowable stresses are from Section II-D 2025 (Metric). <b>Furnace rules (PFT):</b> PFT-15 (plain furnace, minimum 8 mm) and PFT-17 (ring-reinforced: ring 8 to 21 mm and not above 1.25 t, Hr/Tr 3 to 8, ring spacing not above 60 t or 900 mm, B = P.Do/(t + As/Ls)) are built in, with PG-28.3 for the pressure check. Corrugated furnaces (PFT-18) are not covered.',
+ foot:"Not covered: furnace-to-front-tubeplate weld, end plate to furnace weld, stay-rod end welds, weld strength of nozzle compensation (PG-37), safety valve capacity (PG-67), saddles and lugs.",
+ tables:{N:nz(),T:tu()},
+ secs:[SFC.s1(),SF.shell("s2","2"),SFC.s3(),SFC.s31(),SF.endp("s4","4"),
+  SF.plate("s5","5","Front tubeplate (furnace opening and tube nests)","tf"),SF.plate("s6","6","Rear tubeplate (tube nests and stay-rod field)","tr"),
+  SF.tubes("s7","7"),SF.stay("s8","8","Stay rods, furnace end plate to rear tubeplate"),SF.gussetL("s9","9"),SF.heat("s10","10",true),SF.hydro("s11","11"),
+  SF.nozzle("s12","12"),SF.manhole("s13","13"),SF.handhole("s14","14")],
+ open:["s1","s2","s3","s31","s7","s12"]};
+MODELS.crf.tables.N.secId="s12";MODELS.crf.tables.T.secId="s7";
+})();
+
+/* ================= MODEL 2: CBD two-pass firetube boiler, no furnace ================= */
+(function(){
+var DEF={P:150,Q:4000,Tsh:185,Ttu:245,Ttp:245,
+ mat_shell:"SA-516 Gr.70",ov_shell:0,oy_shell:0,mat_tp:"SA-516 Gr.70",ov_tp:0,mat_pl:"SA-516 Gr.70",ov_pl:0,mat_pad:"SA-516 Gr.70",ov_pad:0,mat_stay:"SA-36 bar (stays)",ov_stay:0,
+ ID:2200,E:.95,y:.4,C:2,tmin:6,tsh:15,
+ tf_C:2.2,tf_CA:2,tf_t:19,tf_p:280,tf_Dl:362,tf_e:247,tf_d:63.5,tf_D1:322,tf_D2:358,tf_D3:380,tf_D4:382,tf_D5:0,tf_D6:0,tf_tm:8,
+ tr_C:2.2,tr_CA:2,tr_t:19,tr_p:280,tr_Dl:362,tr_e:247,tr_d:63.5,tr_D1:322,tr_D2:358,tr_D3:380,tr_D4:382,tr_D5:0,tr_D6:0,tr_tm:8,
+ sron:1,sup8:0,d8:38,dh8:5,p8:280,Ls8:4000,gson:1,H9:833,dd9:2,n9:5,W9:19,L9:145,k9:.9,hrc:0,
+ nzAuto:1,tp:15,WL2:7,mhA:360,mhB:440,mhR:19,mhC:.3,mhCA:0,mht:25,hhC:"150",hhT:0};
+var NR=[["M-1","Manhole","440x360","SA-516 Gr.70",0,478,19,1,6,6,0,0,640],
+ ["N-1","Air vent","2in","SA-106 Gr.B",0,60.3,3.91,.875,6,6,0,0,0],["N-2, H-1","Gas connect / handhole","6in","SA-106 Gr.B",0,168.3,7.11,.875,6,6,0,0,0],
+ ["N-3","Main steam outlet","4in","SA-106 Gr.B",0,114.3,6.02,.875,85,6,0,0,0],["N-4, N-5","Safety valve","2in","SA-106 Gr.B",0,60.3,3.91,.875,6,6,0,0,0],
+ ["N-6 ~ N-9","Water level control","1in","SA-106 Gr.B",0,33.4,3.38,.875,6,6,0,0,0],["N-10","Water inlet","3in","SA-106 Gr.B",0,88.9,5.49,.875,6,6,0,0,0],
+ ["N-11, N-17","Clean out","4in","SA-106 Gr.B",0,114.3,6.02,.875,6,6,0,0,0],["N-13, N-14","Water connect","4in","SA-106 Gr.B",0,114.3,6.02,.875,6,6,0,0,0],
+ ["N-15, N-16","Water connect","6in","SA-106 Gr.B",0,168.3,7.11,.875,6,6,0,0,0]];
+var TR=[["Firetube, 1st pass","SA-192",72,76.3,3.2,4000,0,0],["Staytube, 1st pass","SA-192",8,76.3,5.5,4000,0,0],["Firetube, 2nd pass","SA-192",90,63.5,3.2,4000,0,0],["Staytube, 2nd pass","SA-192",6,63.5,4.5,4000,0,0]];
+var s1=function(){return{id:"s1",n:"1",title:"Design basis and materials",ref:"PG-99.1 · II-D 2025 Table 1A",
+ fields:[["P","Design pressure / MAWP, P","psi","10.34 bar at 150 psi"],["Q","Steam capacity, Q","kg/h"],["Tsh","Design metal temperature, shell and plates","°C","saturation at 10.3 bar is about 185 °C"],["Ttu","Design metal temperature, tubes","°C"],["Ttp","Design metal temperature, tubeplates and stays","°C"],
+  ["mat_shell","Material, shell plate","mat"],["ov_shell","   Allowable stress override, shell (0 = II-D table)","psi"],["oy_shell","   Yield strength override, shell (0 = II-D table)","psi"],
+  ["mat_tp","Material, tubeplates","mat"],["ov_tp","   Allowable stress override, tubeplates","psi"],
+  ["mat_pl","Material, gusset and manhole cover","mat"],["ov_pl","   Allowable stress override, these plates","psi"],["mat_pad","Material, reinforcing pads","mat"],["ov_pad","   Allowable stress override, pads","psi"],
+  ["mat_stay","Material, stay rods","mat"],["ov_stay","   Allowable stress override, stay rods","psi"]],
+ calc:function(s){var m=s._m,rows=[R("Test pressure, 1.5 x MAWP",1.5*s.P/14.5038,"bar",2),R("Design pressure",s.P/14.5038,"bar",2)],
+  list=[["Shell",s.mat_shell,m.shell,s.Tsh],["Tubeplates",s.mat_tp,m.tp,s.Ttp],["Gusset, manhole cover",s.mat_pl,m.pl,s.Tsh],["Pads",s.mat_pad,m.pad,s.Tsh],["Stay rods",s.mat_stay,m.stay,s.Ttp]],w=[];
+  list.forEach(function(x){rows.push(R("S, "+x[0]+": "+x[1]+" at "+fmt(x[3],0)+" °C ("+x[2].src+")",x[2].S,"psi",0));rows.push(R("      = "+fmt(x[2].S/MPA,1)+" MPa · "+x[2].ln,"","",0));if(x[2].warn)w.push(x[0]+": "+x[2].warn)});
+  rows.push(R("Sy shell (minimum specified yield)",s.Sy,"psi",0));
+  var notes=[];list.forEach(function(x){if(x[2].note&&notes.indexOf(x[2].note)<0)notes.push(x[2].note)});
+  if(!ok(s.S)||!ok(s.Stp)||!ok(s.Spl)||!ok(s.Sp)||!ok(s.S8))w.push("a material needs an allowable stress value");
+  return{lines:[FM("S from Section II Part D (Metric) 2025, Table 1A, linear interpolation in temperature.")].concat(notes.map(function(t){return FM("Note: "+t)})),rows:rows,
+   verdict:w.length?V("fail","CHECK  "+w.join("; ")):V("pass","PASS  materials permitted for Section I at design temperature")}}}};
+MODELS.cbd={key:"cbd",tab:"CBD",name:"Two-pass firetube boiler, no furnace",title:"CBD Boiler Calculation",
+ sub:"CBD · two-pass firetube steam boiler (no furnace) with stayed tubeplates · ASME BPVC Section I · inputs in psi, mm and °C",
+ pdfName:"CBD firetube boiler",DEF:DEF,derive:deriveFT,
+ note:'<b>Code edition:</b> ASME BPVC Section I 2025; allowable stresses are from Section II-D 2025 (Metric). <b>Template with CBD-4000 example data</b> (shell ID 2200, 4000 long tubes, 150 psi). Replace each yellow field with the project values. Tube groups and nozzles can be added or removed in sections 5 and 10. Materials come from ASME II-D 2025 Table 1A; factors A and B are read from Table G and Table CS-1/CS-2, not by eye as in the earlier Excel sheet.<br><b>Covered:</b> shell (PG-27.2.2), front and rear tubeplates (PG-46, PFT-31), tubes under external pressure (PG-28.3), stay rods (PG-49.1), gusset stays (PFT-32), heating surface and valve count (PG-101, PG-67.1), hydrostatic test (PG-99), openings (PG-33), manhole cover (PG-31.3.3).',
+ foot:"Not covered: weld strength of nozzle compensation (PG-37), safety valve capacity (PG-67), saddles and lifting lugs.",
+ tables:{N:tblN(NR),T:tblT(TR)},
+ secs:[s1(),SF.shell("s2","2"),SF.plate("s3","3","Front tubeplate","tf"),SF.plate("s4","4","Rear tubeplate","tr"),SF.tubes("s5","5"),SF.stay("s6","6"),SF.gusset("s7","7"),SF.heat("s8","8",false),SF.hydro("s9","9"),
+  SF.nozzle("s10","10"),SF.manhole("s11","11"),SF.handhole("s12","12")],
+ open:["s1","s2","s5","s10"]};
+MODELS.cbd.tables.N.secId="s10";MODELS.cbd.tables.T.secId="s5";
+})();
+/* ================= MODEL 3: CWT once-through water-tube boiler, parallel coils ================= */
+/* steam properties (IAPWS-IF97 tables generated off-line, linear interpolation) */
+var P0=1.01325;
+function stRow(P){var a=STSAT,n=a.length;if(P<=a[0][0])return a[0].slice();if(P>=a[n-1][0])return a[n-1].slice();
+ for(var i=1;i<n;i++)if(P<=a[i][0]){var f=(P-a[i-1][0])/(a[i][0]-a[i-1][0]),r=[];for(var k=0;k<8;k++)r.push(a[i-1][k]+f*(a[i][k]-a[i-1][k]));return r}}
+/* saturated-steam row: P bar abs -> {T,hf,hg,rf,rg,mf,mg} */
+function stat(P){var r=stRow(P);return{T:r[1],hf:r[2],hg:r[3],rf:r[4],rg:r[5],mf:r[6]*1e-6,mg:r[7]*1e-6}}
+function liqAt(T){var a=STLIQ,n=a.length;if(T<=a[0][0])return a[0].slice();if(T>=a[n-1][0])return a[n-1].slice();
+ for(var i=1;i<n;i++)if(T<=a[i][0]){var f=(T-a[i-1][0])/(a[i][0]-a[i-1][0]),r=[];for(var k=0;k<5;k++)r.push(a[i-1][k]+f*(a[i][k]-a[i-1][k]));return r}}
+function liqT(h){var a=STLIQ,n=a.length;if(h<=a[0][1])return a[0][0];if(h>=a[n-1][1])return a[n-1][0];
+ for(var i=1;i<n;i++)if(h<=a[i][1])return a[i-1][0]+(h-a[i-1][1])/(a[i][1]-a[i-1][1])*(a[i][0]-a[i-1][0])}
+function haal(Re,rel){if(!(Re>0))return NaN;if(Re<2300)return 64/Re;var a=Math.pow(rel/3.7,1.11)+6.9/Re;return Math.pow(1/(-1.8*Math.log(a)/Math.LN10),2)}
+function ito(Re,id,Dc){if(!(Dc>0))return 1;var z=Re*Math.pow(id/Dc,2);return z>0.034?Math.pow(z,0.05):1}
+/* PG-27.4.6 temperature coefficient y, ferritic steel */
+function yFer(T){return T<=482?0.4:(T<=510?0.4+0.1*(T-482)/28:(T<=538?0.5+0.2*(T-510)/28:0.7))}
+
+var SEL_PH=[["1","1 Economizer (liquid)"],["2","2 Evaporator (boiling)"],["3","3 Superheater (steam)"]];
+var SEL_HS=[["1","Outside circumference"],["2","Projected D x L (furnace)"],["3","Inside circumference"]];
+var Z_F=["name","ph","mat","ovS","OD","t","tol","e","L","Lc","Rb","thin","dz","Kl","hsm","qrel","dTw","Tov","Pdo"];
+var Z_IN=[["name","Zone","tx"],["ph","Phase (in flow order)","sel",SEL_PH],["mat","Tube material","mat"],["ovS","Allowable stress override (0 = II-D table)","num","MPa"],["OD","Outside diameter, D","num","mm"],["t","Nominal wall thickness","num","mm"],["tol","Wall under-tolerance (0 if ordered as minimum wall)","num","%"],["e","Thickness factor e (0 strength-welded, 1 expanded)","num","mm"],
+ ["L","Tube length per circuit","num","m"],["Lc","   of which coiled or bent","num","m"],["Rb","   bend radius to tube centreline","num","mm"],["thin","   wall thinning at the outer side of the bend","num","%"],["dz","Elevation rise along the flow","num","m"],["Kl","Local loss coefficients per circuit (fittings, returns)","num"],
+ ["hsm","Heating surface basis (PG-101.1)","sel",SEL_HS],["qrel","Relative heat flux weight (1 = uniform)","num"],["dTw","Mean wall above the maximum fluid temperature","num","K"],["Tov","Design mean wall temperature override (0 = auto)","num","°C"],["Pdo","Design pressure override (0 = auto)","num","bar g"]];
+var Z_OUT=[["grp","Result"],["st","Final result"],["note","Remarks"],
+ ["grp","Heat duty and fluid state (full load)"],["Q","Heat absorbed, all circuits","kW",1],["Aq","Outside surface, all circuits","m²",2],["q","Mean heat flux on outside surface","kW/m²",1],["Tin","Fluid temperature, inlet","°C",1],["Tout","Fluid temperature, outlet","°C",1],["xin","Dryness, inlet","",3],["xout","Dryness, outlet","",3],["Pin","Operating pressure, inlet","bar g",2],["Pout","Operating pressure, outlet","bar g",2],
+ ["grp","Flow and pressure drop, per circuit"],["mc","Mass flow","kg/s",4],["ID","Inside diameter","mm",1],["G","Mass flux","kg/m²s",0],["v","Mean velocity","m/s",2],["Re","Reynolds number","",0],["f","Friction factor, with coil correction","",4],["dPf","Friction","kPa",1],["dPa","Acceleration","kPa",1],["dPg","Elevation","kPa",1],["dPl","Local losses","kPa",1],["dP","Total pressure drop","kPa",1],
+ ["grp","Strength, PG-27 (internal pressure)"],["Pd","Design pressure","bar g",2],["Tm","Design mean wall temperature","°C",0],["S","Allowable stress, S","MPa",1],["form","Equation used","",0],["tReq","t required","mm",2],["tAv","t minimum available","mm",2],["mg","Margin","%",1],["Pall","Tube MAWP at t available","bar g",2],
+ ["grp","Hydrostatic test, PG-99"],["sig","Membrane stress at test pressure","MPa",0],["lim","Limit, 0.9 Sy","MPa",0]];
+var H_F=["name","mat","ovS","OD","t","tol","C","zl","Pdm","Tdm","p","d"];
+var H_IN=[["name","Header","tx"],["mat","Material","mat"],["ovS","Allowable stress override (0 = II-D table)","num","MPa"],["OD","Outside diameter, D","num","mm"],["t","Nominal wall thickness","num","mm"],["tol","Wall under-tolerance","num","%"],["C","Allowance C (corrosion, threading)","num","mm"],
+ ["zl","Takes pressure and temperature from the inlet of zone no. (0 = manual)","num","no."],["Pdm","   manual design pressure","num","bar g"],["Tdm","   manual design temperature","num","°C"],["p","Pitch of tube holes along the header (0 = no holes)","num","mm"],["d","Diameter of tube holes","num","mm"]];
+var H_OUT=[["grp","Result"],["st","Final result"],["note","Remarks"],["grp","Strength, PG-27.2.2"],["Pd","Design pressure","bar g",2],["T","Design temperature","°C",0],["S","Allowable stress, S","MPa",1],["E","Ligament efficiency, E = (p - d) / p","",3],["y","Coefficient y","",2],["tReq","t required","mm",2],["tAv","t minimum available","mm",2],["mg","Margin","%",1],["Pall","Header MAWP at t available","bar g",2],["grp","Minimum wall and test"],["tmn","PG-16.3 minimum wall (pipe above NPS 5)","mm",2],["sig","Membrane stress at test pressure","MPa",0],["lim","Limit, 0.9 Sy","MPa",0]];
+
+/* ---- thermal-hydraulic march along the zones ---- */
+function cwtCalc(s,Z){
+ var nc=Math.max(1,Math.round(s.nc)),x=Math.min(1,Math.max(.05,s.xout)),ms=s.ms,mfw=ms/x,Pop=s.Pop+P0,nz=Z.length,g=9.80665,eps=s.eps/1000,phi=s.phi2>0?s.phi2:1,warn=[],
+  hfw=liqAt(s.Tfw)[1],Pin=[],Pout=[],res=[],ph=Z.map(function(z){return Math.round(+z.ph)}),has=function(k){return ph.indexOf(k)>=0};
+ for(var i=0;i<nz;i++){Pin[i]=Pop;Pout[i]=Pop}
+ var geo=Z.map(function(z){var Ao=Math.PI*z.OD/1000*z.L*nc;return{Ao:Ao,w:Ao*(z.qrel>0?z.qrel:1),ID:z.OD-2*z.t}}),
+  hb={};
+ for(var it=0;it<5;it++){
+  var i1=ph.indexOf(2),iN=ph.lastIndexOf(2),PevIn=i1>=0?Pin[i1]:Pop,PevOut=iN>=0?Pout[iN]:Pop,sIn=stat(PevIn),sOut=stat(PevOut),
+   Q1=has(1)?Math.max(0,mfw/3600*(sIn.hf-hfw)):0,hex=sOut.hf+x*(sOut.hg-sOut.hf),Q2=has(2)?Math.max(0,mfw/3600*(hex-hfw)-Q1):0,Q3=(has(3)&&s.dTsh>0)?ms/3600*s.cpsh*s.dTsh:0,
+   W=[0,0,0,0];geo.forEach(function(q,j){W[ph[j]]+=q.w});
+  hb={Q1:Q1,Q2:Q2,Q3:Q3,Q:Q1+Q2+Q3,mfw:mfw,hfw:hfw,hex:hex,PevIn:PevIn,PevOut:PevOut};
+  var hM=hfw,Tprev=NaN,dP=[],first3=ph.indexOf(3);res=[];
+  for(var j=0;j<nz;j++){
+   var z=Z[j],p=ph[j],Qj=(p===1?Q1:p===2?Q2:Q3)*(W[p]>0?geo[j].w/W[p]:0),Pm=(Pin[j]+Pout[j])/2,sm=stat(Pm),sI=stat(Pin[j]),sO=stat(Pout[j]),flow=p===3?ms:mfw,
+    hin,hout,Tin,Tout,xin=NaN,xout=NaN,Tf;
+   if(p===3){hin=(j===first3&&!(ph[j-1]===3))?sI.hg:hM;hM=hin;hout=hin+Qj/(ms/3600);hM=hout;Tin=(j>0&&ph[j-1]===3)?Tprev:sI.T;Tout=Tin+Qj/(ms/3600*s.cpsh)}
+   else{hin=hM;hout=hin+Qj/(mfw/3600);hM=hout}
+   if(p===1){Tin=liqT(hin);Tout=Math.min(liqT(hout),sm.T)}
+   if(p===2){Tin=sI.T;Tout=sO.T;xin=Math.min(1,Math.max(0,(hin-sI.hf)/(sI.hg-sI.hf)));xout=Math.min(1,Math.max(0,(hout-sO.hf)/(sO.hg-sO.hf)))}
+   Tprev=Tout;Tf=Math.max(Tin,Tout);
+   var IDm=geo[j].ID/1000,Af=Math.PI*IDm*IDm/4,mc=flow/3600/nc,G=mc/Af,L=z.L,Lc=Math.min(Math.max(z.Lc,0),L),Dc=z.Rb>0?2*z.Rb/1000:0,rel=eps/IDm,rho,mu,Re,fs,fc,fav,dPf,dPa=0,dPg,dPl,v,fx=NaN;
+   if(p===1){var pr=liqAt((Tin+Tout)/2);rho=pr[2];mu=pr[3]*1e-6;v=G/rho;Re=G*IDm/mu;fs=haal(Re,rel);fc=fs*ito(Re,IDm,Dc);fav=((L-Lc)*fs+Lc*fc)/(L||1);dPf=fav*(L/IDm)*G*G/(2*rho);dPl=z.Kl*G*G/(2*rho);dPg=rho*g*z.dz}
+   else if(p===2){var vin=xin/sI.rg+(1-xin)/sI.rf,vout=xout/sO.rg+(1-xout)/sO.rf,va=(vin+vout)/2,xm=(xin+xout)/2;mu=1/(xm/sm.mg+(1-xm)/sm.mf);rho=1/va;v=G*va;Re=G*IDm/mu;fs=haal(Re,rel);fc=fs*ito(Re,IDm,Dc);fav=((L-Lc)*fs+Lc*fc)/(L||1);dPf=phi*fav*(L/IDm)*G*G*va/2;dPa=G*G*(vout-vin);dPl=z.Kl*G*G*va/2;dPg=rho*g*z.dz}
+   else{var Tm3=(Tin+Tout)/2,rI=sm.rg*(sm.T+273.15)/(Tin+273.15),rO=sm.rg*(sm.T+273.15)/(Tout+273.15);rho=sm.rg*(sm.T+273.15)/(Tm3+273.15);mu=sm.mg*Math.pow((Tm3+273.15)/(sm.T+273.15),0.7);v=G/rho;Re=G*IDm/mu;fs=haal(Re,rel);fc=fs*ito(Re,IDm,Dc);fav=((L-Lc)*fs+Lc*fc)/(L||1);dPf=fav*(L/IDm)*G*G/(2*rho);dPa=G*G*(1/rO-1/rI);dPl=z.Kl*G*G/(2*rho);dPg=rho*g*z.dz}
+   var dPt=dPf+dPa+dPg+dPl;dP.push(dPt/1e5);
+   res.push({ph:p,Q:Qj,Aq:geo[j].Ao,q:geo[j].Ao>0?Qj/geo[j].Ao:NaN,Tin:Tin,Tout:Tout,Tf:Tf,xin:xin,xout:xout,mc:mc,ID:geo[j].ID,G:G,v:v,Re:Re,f:fav,dPf:dPf/1e3,dPa:dPa/1e3,dPg:dPg/1e3,dPl:dPl/1e3,dP:dPt/1e3,dPbar:dPt/1e5,Ptr:Pm})}
+  Pout[nz-1]=Pop;for(var k=nz-1;k>=0;k--){Pin[k]=Pout[k]+dP[k];if(k>0)Pout[k-1]=Pin[k]}
+ }
+ res.forEach(function(r,j){r.Pin=Pin[j]-P0;r.Pout=Pout[j]-P0});
+ /* design pressure and strength */
+ var cum=0,Pm_=s.Pm;
+ for(var j2=nz-1;j2>=0;j2--){cum+=res[j2].dPbar;res[j2].Pd=Z[j2].Pdo>0?Z[j2].Pdo:Pm_+(s.incDP?cum:0)}
+ res.forEach(function(r,j){var z=Z[j],mi,Tm,S,note=[],Do=z.OD,ta=z.t*(1-z.tol/100),Pd=r.Pd/10;
+  Tm=z.Tov>0?z.Tov:r.Tf+z.dTw;mi=matInfo(z.mat,Tm,z.ovS>0?z.ovS*MPA:0);S=mi.S/MPA;if(mi.warn)note.push(mi.warn);
+  var small=Do<=125,tReq,Pall,y=yFer(Tm);
+  if(small){tReq=Pd*Do/(2*S+Pd)+0.005*Do+z.e;var u=ta-0.005*Do-z.e;Pall=10*2*S*u/(Do-u)}
+  else{tReq=Pd*Do/(2*S+2*y*Pd)+z.e;var u2=ta-z.e;Pall=10*2*S*u2/(Do-2*y*u2)}
+  var Sy=isFinite(MAT[z.mat]&&MAT[z.mat].sy)?MAT[z.mat].sy:NaN;
+  r.Tm=Tm;r.S=S;r.form=small?"27.2.1 (D ≤ 125 mm)":"27.2.2 (D > 125 mm)";r.tReq=tReq;r.tAv=ta;r.mg=(ta/tReq-1)*100;r.Pall=Pall;r.warn=note;r.Sy=Sy;r.small=small;r.y=y});
+ if(!has(2))warn.push("no evaporator zone (phase 2)");
+ for(var q=1;q<nz;q++)if(ph[q]<ph[q-1]){warn.push("zones are not in flow order (economizer, evaporator, superheater)");break}
+ if(s.dTsh>0&&!has(3))warn.push("superheat duty entered but no superheater zone");
+ if(has(3)&&!(s.dTsh>0))warn.push("superheater zone present but superheat is zero");
+ if(has(1)&&hb.Q1<=0)warn.push("feedwater is already at saturation: no economizer duty");
+ hb.warn=warn;hb.dPtot=res.reduce(function(a,r){return a+r.dPbar},0);hb.dPph=[0,0,0,0];res.forEach(function(r){hb.dPph[r.ph]+=r.dPbar});hb.nc=nc;hb.Pop=Pop;
+ return{z:res,hb:hb}}
+
+function cwtHead(s,H,zr){var out=[];
+ H.forEach(function(h){var zi=Math.round(h.zl)-1,r={},z=zr[zi],note=[];
+  var Pd=zi>=0&&z?z.Pd:h.Pdm,T0=zi>=0&&z?z.Tf:h.Tdm;
+  var Ts=ok(Pd)?stat(Pd/1+P0).T:NaN,T=Math.max(T0||0,Ts||0),mi=matInfo(h.mat,T,h.ovS>0?h.ovS*MPA:0),S=mi.S/MPA,y=yFer(T),
+   E=h.p>0&&h.d>0&&h.p>h.d?(h.p-h.d)/h.p:1,ta=h.t*(1-h.tol/100),P=Pd/10,tReq=P*h.OD/(2*S*E+2*y*P)+h.C,u=ta-h.C,Pall=10*2*S*E*u/(h.OD-2*y*u),tmn=h.OD>141.3?6:0;
+  if(mi.warn)note.push(mi.warn);if(h.p>0&&h.d>=h.p)note.push("hole diameter not below pitch");
+  var Sy=isFinite(MAT[h.mat]&&MAT[h.mat].sy)?MAT[h.mat].sy:NaN;
+  out.push({Pd:Pd,T:T,S:S,E:E,y:y,tReq:tReq,tAv:ta,mg:(ta/tReq-1)*100,Pall:Pall,tmn:tmn,warn:note,Sy:Sy,ta:ta})});
+ return out}
+
+function cwtDerive(s,tb){var cz=cwtCalc(s,tb.Z),hh=cwtHead(s,tb.H,cz.z);
+ s._z=cz.z;s._hb=cz.hb;s._h=hh;s._Z=tb.Z;s._H=tb.H;
+ var Pmax=s.Pm;cz.z.forEach(function(r){if(r.Pd>Pmax)Pmax=r.Pd});hh.forEach(function(r){if(r.Pd>Pmax)Pmax=r.Pd});
+ s._Pmax=Pmax;s._Pt=Math.max(1.5*s.Pm,1.25*Pmax);
+ /* separator as the host for the nozzle table: psi / mm units of the shared nozzle routine */
+ var a=matInfo(s.mat_sep,stat(s.Pm+P0).T,s.ov_sep);
+ s.Tsh=stat(s.Pm+P0).T;s.P=s.Pm*14.5038;s.S=a.S;s.Sy=a.Sy;s.Sv=a.S;s.Sp=matInfo(s.mat_pad,s.Tsh,s.ov_pad).S;s._m={sep:a};
+ /* tube hydrostatic stress */
+ cz.z.forEach(function(r){r.sig=s._Pt/10*(tb.Z[cz.z.indexOf(r)].OD-r.tAv)/(2*r.tAv);r.lim=0.9*(r.Sy||NaN)});
+ hh.forEach(function(r,i){var h=tb.H[i];r.sig=s._Pt/10*(h.OD-r.ta)/(2*r.ta*r.E);r.lim=0.9*(r.Sy||NaN)});
+ return s}
+
+function zRes(s,Z){return(s._z||[]).map(function(r,j){var z=Z[j],bad=[];
+ var rem=[];if(!ok(r.S))bad.push("allowable stress missing");if(r.warn&&r.warn.length)r.warn.forEach(function(w){if(/note S1/.test(w))rem.push(w);else bad.push(w)});
+ if(!(r.tAv>=r.tReq))bad.push("t available below t required");if(!(r.Pall>=r.Pd))bad.push("tube MAWP below design pressure");
+ if(!(r.sig<=r.lim))bad.push("test stress above 0.9 Sy");if(!(z.OD>z.t*2)||!(z.t>0)||!(z.L>0))bad.push("check geometry");
+ var o=Object.assign({},r);o.st=bad.length?"FAIL":"PASS";o.cls=bad.length?"fail":"pass";o.note=bad.length?bad.join("; "):(rem.length?rem.join("; "):"-");return o})}
+function hRes(s,H){return(s._h||[]).map(function(r,j){var bad=[];
+ var rem=[];if(!ok(r.S))bad.push("allowable stress missing");r.warn.forEach(function(w){if(/note S1/.test(w))rem.push(w);else bad.push(w)});
+ if(!(r.tAv>=r.tReq))bad.push("t available below t required");if(!(r.tAv>=r.tmn))bad.push("below minimum wall (PG-16.3)");if(!(r.Pall>=r.Pd))bad.push("header MAWP below design pressure");
+ if(!(r.sig<=r.lim))bad.push("test stress above 0.9 Sy");
+ var o=Object.assign({},r);o.st=bad.length?"FAIL":"PASS";o.cls=bad.length?"fail":"pass";o.note=bad.length?bad.join("; "):(rem.length?rem.join("; "):"-");return o})}
+
+(function(){
+var DEF={Pm:10.34,Pop:8.5,ms:2000,xout:.95,dTsh:0,cpsh:2.2,Tfw:105,eta:90,nc:4,eps:.045,phi2:1,incDP:1,
+ Gmin:200,Gmax:2500,qmax:200,dPmax:3,rEv:.3,vmaxS:40,
+ mat_sep:"SA-516 Gr.70",ov_sep:0,mat_pad:"SA-516 Gr.70",ov_pad:0,sepOn:1,ID:400,E:.85,y:.4,C:1,tmin:6,tsh:8,
+ nzAuto:1,tp:8,WL2:6,
+ bendExt:0,bendHF:1,
+ opMode:1,Mmax:0,Wrv:2400,Pset:10.34,nrv:1,Wpa:0,Wprv:0,Pset2:11.5,econShut:0,Wecon:0};
+var ZR=[["Economizer coil","1","SA-210 Gr.A-1",0,31.8,3.0,0,0,12,12,250,10,0.5,1,1,1,40,0,0],
+ ["Evaporator coil","2","SA-210 Gr.A-1",0,31.8,3.0,0,0,30,30,250,10,1.5,1.5,2,1,40,0,0]];
+var HR=[["Inlet header","SA-106 Gr.B",0,114.3,6.02,12.5,1,1,0,0,70,32],["Outlet header","SA-106 Gr.B",0,114.3,6.02,12.5,1,2,0,0,70,32]];
+var NR=[["N-1","Wet steam inlet","4in","SA-106 Gr.B",0,114.3,6.02,.875,6,6,0,0,0],["N-2","Steam outlet","2in","SA-106 Gr.B",0,60.3,3.91,.875,6,6,0,0,0],
+ ["N-3","Safety valve","1.5in","SA-106 Gr.B",0,48.3,3.68,.875,6,6,0,0,0],["N-4","Drain","1in","SA-106 Gr.B",0,33.4,3.38,.875,6,6,0,0,0]];
+var tZ={key:"Z",label:"zone",secId:"c2",F:Z_F,DEF:ZR,IN:Z_IN,OUT:Z_OUT,min:1,
+ calcAll:function(s,a){return zRes(s,a)},
+ verdict:function(cs,a,s){var nf=cs.filter(function(c){return c.cls==="fail"}).length;return nf?V("fail","FAIL  "+nf+" of "+cs.length+" zone(s) not satisfied"):V("pass","PASS  all "+cs.length+" zones satisfy PG-27 and the test stress")},
+ tag:function(o,i){return(o.name||("Zone "+(i+1)))},
+ onAdd:function(n,a){n.name="Zone "+(a.length+1)},onDup:function(n){n.name=n.name+" (copy)"},
+ pdf:{head:["Zone","Ph","Material","D x t","Q kW","q kW/m2","G","dP kPa","Pd bar","Tm C","S MPa","t req","t avail","MAWP bar","Result"],resCol:14,
+  row:function(o,c){return[o.name,o.ph,o.mat,fmt(o.OD,1)+" x "+fmt(o.t,2),fmt(c.Q,1),fmt(c.q,1),fmt(c.G,0),fmt(c.dP,1),fmt(c.Pd,2),fmt(c.Tm,0),fmt(c.S,1),fmt(c.tReq,2),fmt(c.tAv,2),fmt(c.Pall,2),c.st]}}};
+var tH={key:"H",label:"header",secId:"c5",F:H_F,DEF:HR,IN:H_IN,OUT:H_OUT,min:1,
+ calcAll:function(s,a){return hRes(s,a)},
+ verdict:function(cs){var nf=cs.filter(function(c){return c.cls==="fail"}).length;return nf?V("fail","FAIL  "+nf+" of "+cs.length+" header(s) not satisfied"):V("pass","PASS  all "+cs.length+" headers")},
+ tag:function(o,i){return(o.name||("Header "+(i+1)))},
+ onAdd:function(n,a){n.name="Header "+(a.length+1)},onDup:function(n){n.name=n.name+" (copy)"},
+ pdf:{head:["Header","Material","D x t","Pd bar","T C","S MPa","E","t req","t avail","MAWP bar","Result"],resCol:10,
+  row:function(o,c){return[o.name,o.mat,fmt(o.OD,1)+" x "+fmt(o.t,2),fmt(c.Pd,2),fmt(c.T,0),fmt(c.S,1),fmt(c.E,3),fmt(c.tReq,2),fmt(c.tAv,2),fmt(c.Pall,2),c.st]}}};
+var tN=tblN(NR);tN.secId="c7";
+var vOff=tN.verdict;tN.verdict=function(cs,a,s){return s.sepOn?vOff(cs):V("na","N/A  no separator")};
+
+function sNA(s,txt){return!s.sepOn?{rows:[],verdict:V("na","N/A  "+(txt||"no separator in this design"))}:null}
+
+var secs=[
+{id:"c1",n:"1",title:"Design basis and heat balance",ref:"PG-21 · PG-99.3 · steam tables IAPWS-IF97",
+ fields:[["Pm","Maximum allowable working pressure at steam outlet (MAWP, master stamping)","bar g"],["Pop","Operating pressure at steam outlet","bar g"],["ms","Steam output, net","kg/h"],["xout","Dryness at evaporator outlet (the rest goes to drain at the separator)","","1 = all steam"],["dTsh","Superheat added after the separator (0 = none)","K"],["cpsh","Specific heat of the steam in the superheater","kJ/kgK"],["Tfw","Feedwater temperature","°C"],["eta","Combustion efficiency on heat absorbed","%"],["nc","Number of parallel circuits","nos","all circuits identical"],["eps","Tube roughness","mm","commercial steel 0.045"],["phi2","Two-phase friction multiplier on the homogeneous model","","1 = pure homogeneous (screening)"],["incDP","Add the downstream pressure drop to the design pressure of each zone","flag"]],
+ calc:function(s){var hb=s._hb,z=s._z,sat=stat(s.Pop+P0),satm=stat(s.Pm+P0),rows=[R("Feedwater flow, steam / dryness",hb.mfw,"kg/h",0),R("Drain at separator",hb.mfw-s.ms,"kg/h",0),R("Saturation temperature at operating outlet pressure",sat.T,"°C",1),R("Saturation temperature at MAWP",satm.T,"°C",1),
+  R("Feedwater enthalpy",hb.hfw,"kJ/kg",1),R("Duty, economizer (liquid heating)",hb.Q1,"kW",1),R("Duty, evaporator",hb.Q2,"kW",1),R("Duty, superheater",hb.Q3,"kW",1),R("Total heat absorbed",hb.Q,"kW",1,1),R("Fuel input, absorbed / efficiency",hb.Q/(s.eta/100),"kW",1),
+  R("Mass flow per circuit",hb.mfw/3600/hb.nc,"kg/s",4),R("Total pressure drop through the coils at full load",hb.dPtot,"bar",2),R("Highest design pressure of any pressure part",s._Pmax,"bar g",2),
+  R("Hydrostatic test pressure, larger of 1.5 x MAWP and 1.25 x highest part pressure (PG-99.3.1)",s._Pt,"bar g",2,1)];
+  var bad=hb.warn.slice();if(!(s.Pm>=s.Pop))bad.push("MAWP below the operating pressure");if(!(s.ms>0)||!(s.Tfw>0))bad.push("check flow and feedwater temperature");if(s.Pm+P0>45||s.Pm+P0<1)bad.push("pressure outside the steam table range (1 to 45 bar abs)");
+  return{lines:[FM("Q1 = mfw.(hf − hfw) ;  Q2 = mfw.(hf + x.hfg − hfw) − Q1 ;  Q3 = ms.cp.ΔTsh   (duty of each phase, shared over its zones by outside area)"),FM("Zone design pressure = MAWP at outlet + pressure drop from the zone inlet to the outlet.  PG-99.3: test pressure is based on the outlet MAWP and on every part."),FM("The page assumes the evaporator inlet is saturated liquid and the separator removes the drain; dry-out and flow stability are not calculated.")],rows:rows,
+   verdict:bad.length?V("fail","CHECK  "+bad.join("; ")):V("pass","PASS  heat balance consistent, pressures within range")}}},
+{id:"c2",n:"2",title:"Tube zones: pressure drop and strength",ref:"PG-27.2.1 · PG-27.4 · PG-16.5 · PG-21",table:"Z"},
+{id:"c3",n:"3",title:"Thermal-hydraulic checks (design guidance)",ref:"not Code requirements · limits are set by the designer",
+ fields:[["Gmin","Minimum mass flux","kg/m²s"],["Gmax","Maximum mass flux","kg/m²s"],["qmax","Maximum mean heat flux, outside surface","kW/m²"],["dPmax","Maximum total pressure drop (feed pump head)","bar"],["vmaxS","Maximum steam velocity in the superheater","m/s"],["rEv","Minimum evaporator share of the total pressure drop (flow stability among parallel circuits)","","0.3 to 0.5 is usual guidance"]],
+ calc:function(s){var z=s._z,hb=s._hb,rows=[],bad=[];
+  z.forEach(function(r,j){var nm=(s._Z[j].name||("Zone "+(j+1)));rows.push(R(nm+": mass flux",r.G,"kg/m²s",0));rows.push(R(nm+": heat flux",r.q,"kW/m²",1));
+   if(r.G<s.Gmin)bad.push(nm+" mass flux below "+s.Gmin);if(r.G>s.Gmax)bad.push(nm+" mass flux above "+s.Gmax);if(r.q>s.qmax)bad.push(nm+" heat flux above "+s.qmax);if(r.ph===3&&r.v>s.vmaxS)bad.push(nm+" steam velocity above "+s.vmaxS+" m/s");if(r.Re<4000)bad.push(nm+" Reynolds number below 4000")});
+  var sh=hb.dPtot>0?hb.dPph[2]/hb.dPtot:NaN;rows.push(R("Total pressure drop",hb.dPtot,"bar",2,1),R("Limit",s.dPmax,"bar",2),R("Evaporator share of the total",sh,"",3,1),R("Limit",s.rEv,"",2));
+  if(hb.dPtot>s.dPmax)bad.push("total pressure drop above "+s.dPmax+" bar");if(!(sh>=s.rEv))bad.push("evaporator share of pressure drop below "+s.rEv);
+  return{lines:[FM("Homogeneous two-phase model, Haaland friction factor, Ito correction for coils (Re.(d/Dc)² > 0.034)."),FM("A screening estimate: confirm with the burner/boiler supplier's correlations and test data.")],rows:rows,
+   verdict:bad.length?V("warn","CHECK  "+bad.join("; ")):V("pass","PASS  within the limits set above")}}},
+{id:"c4",n:"4",title:"Coil bends: forming strain and thinning",ref:"PG-19 · PG-20.1 · PG-16.7",
+ fields:[["bendExt","Bends are outside the boiler enclosure or membrane wall","flag","PG-20.1.1 (a)"],["bendHF","Tube supplied hot-finished, not heat treated","flag","strain limit 5 % instead of 12.5 %"]],
+ calc:function(s){var z=s._z,Z=s._Z,rows=[],bad=[],act=[],any=0;
+  z.forEach(function(r,j){var q=Z[j],nm=q.name||("Zone "+(j+1));if(!(q.Rb>0&&q.Lc>0)){return}any=1;
+   var eps=100*(q.OD/2)/q.Rb,lim=s.bendHF?5:12.5,carbon=!/T11|T22|P11|P22/.test(q.mat),ht=s.bendExt&&carbon&&r.Tm>=327&&r.Tm<=399&&eps>lim,tx=q.t*(1-q.tol/100)*(1-q.thin/100),mg=tx/r.tReq-1;
+   rows.push(R(nm+": R / D",q.Rb/q.OD,"",2));rows.push(R(nm+": forming strain 100.r/R (PG-19)",eps,"%",1));rows.push(R(nm+": wall at outer bend, t(1 - tol)(1 - thinning)",tx,"mm",2));rows.push(R(nm+": t required, straight tube",r.tReq,"mm",2));rows.push(R(nm+": post-bend heat treatment (PG-20.1.1)",ht?"REQUIRED":(carbon?"not required":"see PG-20"),"",0,1));
+   if(tx<r.tReq)bad.push(nm+": thinned wall below t required");if(ht)act.push(nm+": heat treatment after bending required (PG-20.1.1)");if(!carbon&&eps>5)act.push(nm+": alloy steel, check PG-20 for heat treatment")});
+  return{lines:[FM("εf = 100.r/R  (tube and pipe bends, PG-19).  PG-20.1.1: heat treatment after cold forming carbon steel water/steam tube when all apply: tube outside the enclosure, 327 to 399 °C, strain above 12.5 % (annealed or normalized stock) or 5 % (as hot-finished)."),FM("PG-16.7: dimensional symbols carry no forming allowance, so the wall at the outer bend must still meet t required.")],rows:rows,
+   verdict:!any?V("na","N/A  no coiled or bent length entered"):(bad.length?V("fail","FAIL  "+bad.join("; ")):(act.length?V("warn","CHECK  "+act.join("; ")):V("pass","PASS  thinned wall and forming strain acceptable")))}}},
+{id:"c5",n:"5",title:"Headers and manifolds",ref:"PG-27.2.2 · PG-52 · PG-16.3 · PG-99.3",table:"H"},
+{id:"c6",n:"6",title:"Steam separator shell",ref:"PG-27.2.2 · PG-16.3 · PG-99.3",
+ fields:[["sepOn","Steam separator or drum in use","flag"],["mat_sep","Material, shell","mat"],["ov_sep","   Allowable stress override (0 = II-D table)","psi"],["mat_pad","Material, reinforcing pads","mat"],["ov_pad","   Allowable stress override, pads","psi"],["ID","Shell inside diameter","mm"],["E","Joint efficiency, E","","1.00 only with full RT stated"],["y","Temperature coefficient, y","","PG-27.4.6, ferritic ≤ 482 °C"],["C","Allowance C","mm"],["tmin","Minimum plate thickness","mm","PG-16.3"],["tsh","Shell thickness selected","mm"]],
+ calc:function(s){var na=sNA(s);if(na)return na;var Rr=s.ID/2+s.C,treq=s.P*Rr/(s.S*s.E-(1-s.y)*s.P)+s.C,mawp=s.S*s.E*(s.tsh-s.C)/(Rr+(1-s.y)*(s.tsh-s.C)),Pt=s._Pt*14.5038,m=Pt*(s.ID/2+.6*s.tsh)/(s.E*s.tsh);
+  return{lines:[FM("t = P.R / (S.E − (1 − y).P) + C ;  design temperature = saturation at MAWP"),FM("hydrostatic membrane stress  σ = Pt.(R + 0.6 t) / (E.t) ≤ 0.9 Sy")],rows:[R("Design pressure",s.Pm,"bar g",2),R("Design temperature",s.Tsh,"°C",1),R("Allowable stress, S",s.S,"psi",0),R("t required",treq,"mm",2,1),R("t selected",s.tsh,"mm",1),R("Shell MAWP at selected thickness",mawp/14.5038,"bar g",2),R("Test pressure, PG-99.3",s._Pt,"bar g",2),R("Membrane stress at test",m,"psi",0),R("Limit, 0.9 Sy",.9*s.Sy,"psi",0)],
+   verdict:pf(s.tsh>=treq&&s.tsh-s.C>=s.tmin&&mawp>=s.P&&m<=.9*s.Sy,"thickness, minimum, MAWP and test stress satisfied","check t, minimum, MAWP or test stress")}}},
+{id:"c7",n:"7",title:"Separator openings, all calculated",ref:"PG-33 · no PG-32 exemption",table:"N"},
+{id:"c8",n:"8",title:"Heating surface and overpressure protection",ref:"PG-101 · PG-67.1 · PG-67.2 · PG-67.4",
+ fields:[["opMode","Protection route","sel","",[["1","1  PG-67.1 to 67.3 relief valves"],["2","2  PG-67.4 forced-flow generator"]]],["Mmax","Maximum designed steaming capacity (0 = net steam output)","kg/h"],["nrv","Number of pressure relief valves fitted (route 1)","nos"],["Wrv","Total rated capacity, relief valves (route 1)","kg/h"],["Pset","Highest set pressure, relief valves (route 1)","bar g"],["Wpa","Power-actuated valves, total capacity (route 2)","kg/h"],["Wprv","Pressure relief valves, total capacity (route 2)","kg/h"],["Pset2","Highest set pressure, relief valves (route 2)","bar g"],["econShut","Economizer can be shut off from the boiler","flag"],["Wecon","Economizer relief valve capacity","kg/h"]],
+ calc:function(s){var z=s._z,Z=s._Z,rows=[],HS=0,hb=s._hb;
+  z.forEach(function(r,j){var q=Z[j],m=Math.round(+q.hsm),a=m===2?q.OD/1000*q.L*hb.nc:(m===3?Math.PI*r.ID/1000*q.L*hb.nc:Math.PI*q.OD/1000*q.L*hb.nc);HS+=a;rows.push(R((q.name||"Zone "+(j+1))+" ("+(m===2?"projected":m===3?"inside":"outside")+")",a,"m²",2))});
+  var ft2=HS*10.7639,M=s.Mmax>0?s.Mmax:s.ms,nreq=ft2>500?2:1,bad=[];
+  rows.push(R("Total heating surface",HS,"m²",2,1),R("Total heating surface",ft2,"ft²",0),R("Minimum number of pressure relief valves, PG-67.1 (more than 500 ft² / 47 m² of bare tube: two or more)",nreq,"nos",0,1),R("Maximum designed steaming capacity",M,"kg/h",0,1),R("Steam output per m² of heating surface",s.ms/HS,"kg/m²h",1));
+  if(s.opMode===1||s.opMode==="1"){rows.push(R("Route 1: required relieving capacity, not less than the maximum steaming capacity",M,"kg/h",0),R("Rated capacity provided",s.Wrv,"kg/h",0,1),R("Highest set pressure / MAWP",s.Pset,"bar g",2));
+   if(s.Wrv<M)bad.push("relief valve capacity below maximum steaming capacity");if(s.Pset>s.Pm)bad.push("set pressure above MAWP (PG-67.3)");if(s.nrv<nreq)bad.push("fewer relief valves than PG-67.1 requires")}
+  else{var pa=s.Wpa/M*100,tot=(s.Wpa+s.Wprv)/M*100;rows.push(R("Route 2: power-actuated valves, at least 10 % of the maximum steaming capacity (PG-67.4.1)",pa,"%",1,1),R("Power-actuated valves plus relief valves, at least 100 % (PG-67.4.2)",tot,"%",1,1),R("Maximum set pressure of relief valves, MAWP + 17 % (PG-67.4.2)",s.Pm*1.17,"bar g",2),R("Highest set pressure entered",s.Pset2,"bar g",2));
+   if(pa<10)bad.push("power-actuated capacity below 10 %");if(tot<100)bad.push("total relieving capacity below 100 %");if(s.Pset2>s.Pm*1.17)bad.push("relief valve set pressure above MAWP + 17 %")}
+  if(s.econShut){var req=hb.Q1*1000/646;rows.push(R("Economizer relief valve, maximum heat absorption / 646 W per kg/h (PG-67.2.1.6)",req,"kg/h",0,1),R("Capacity provided",s.Wecon,"kg/h",0));if(s.Wecon<req)bad.push("economizer relief capacity below "+fmt(req,0)+" kg/h")}
+  return{lines:[FM("PG-67.4 applies to a forced-flow generator with no fixed steam and waterline, with automatic controls and interlocks responsive to steam pressure.  Valve capacity certification, trips and the control logic are not checked here."),FM("Heating surface: outside the furnace circumferentially (PG-101.1.2); in the furnace as projected area, D x L (PG-101.1.3).")],rows:rows,
+   verdict:bad.length?V("fail","FAIL  "+bad.join("; ")):V("pass","PASS  protection satisfies the route selected")}}},
+{id:"c9",n:"9",title:"Hydrostatic test summary",ref:"PG-99.1 · PG-99.3",fields:[],
+ calc:function(s){var z=s._z,h=s._h,rows=[R("Outlet MAWP",s.Pm,"bar g",2),R("1.5 x MAWP at steam outlet",1.5*s.Pm,"bar g",2),R("Highest design pressure of any part",s._Pmax,"bar g",2),R("1.25 x highest part pressure",1.25*s._Pmax,"bar g",2),R("First-stage test pressure (larger)",s._Pt,"bar g",2,1),R("Second stage: reduced to the outlet MAWP, at least",s.Pm,"bar g",2)],bad=[];
+  z.forEach(function(r,j){var nm=s._Z[j].name||("Zone "+(j+1));rows.push(R(nm+": membrane stress / 0.9 Sy",r.sig/r.lim,"",2));if(!(r.sig<=r.lim))bad.push(nm)});
+  h.forEach(function(r,j){var nm=s._H[j].name||("Header "+(j+1));rows.push(R(nm+": membrane stress / 0.9 Sy",r.sig/r.lim,"",2));if(!(r.sig<=r.lim))bad.push(nm)});
+  return{lines:[FM("PG-99.3.1: first stage at least 1.5 x MAWP at the steam outlet and at least 1.25 x the MAWP of any part (boiler external piping excluded)."),FM("No part may exceed a general membrane stress of 90 % of yield at test temperature (PG-99.1).")],rows:rows,
+   verdict:bad.length?V("fail","FAIL  test stress above 0.9 Sy: "+bad.join(", ")):V("pass","PASS  every tube and header within 0.9 Sy at the test pressure")}}}
+];
+MODELS.cwt={key:"cwt",tab:"CWT",name:"Once-through water-tube boiler",title:"CWT Once-Through Boiler Calculation",
+ sub:"CWT · once-through water-tube steam boiler, parallel coils · ASME BPVC Section I · inputs in bar g, mm, m and °C",
+ pdfName:"CWT once-through boiler",DEF:DEF,derive:cwtDerive,
+ note:'<b>Code edition:</b> ASME BPVC Section I 2025; allowable stresses are from Section II-D 2025 (Metric).<br><b>Example data:</b> 2 t/h net steam at 8.5 bar g, MAWP 10.34 bar g, four parallel circuits of 31.8 x 3.0 mm tube. Replace every yellow field with the project values.<br><b>How it works.</b> The page heats the feedwater along the zones in flow order (economizer, evaporator, optional superheater), shares each phase duty over its zones by outside area, then works the pressure drop back from the steam outlet. Each zone is designed at the MAWP plus the pressure drop downstream of its inlet (PG-99.3 then fixes the test pressure). Tubes follow PG-27.2.1, headers PG-27.2.2 with ligament efficiency, the separator PG-27.2.2 and PG-33.<br><b>Design guidance, not Code:</b> the pressure-drop model (homogeneous two-phase, Haaland and Ito friction), mass-flux, heat-flux and stability limits are screening checks with limits you set. Wall temperature rise, dry-out and flow instability need the supplier\'s data.',
+ foot:"Steam properties: IAPWS-IF97, tabulated 1 to 45 bar abs (saturation) and 10 to 300 °C (liquid), interpolated. Not covered: boiler external piping, supports and expansion of the coils, weld strength of the compensation (PG-37), combustion and fuel train, low-water and flame safeguards, control logic.",
+ tables:{Z:tZ,H:tH,N:tN},secs:secs,open:["c1","c2","c3","c5"]};
+})();
+/* ================= engine: models, tabs, tables, project, PDF ================= */
+MODELS.crf.meta=MODELS.cbd.meta=function(S){return[["Design pressure",fmt(S.P/14.5038,2)+" bar ("+fmt(S.P,1)+" psi)"],["Steam capacity",fmt(S.Q,0)+" kg/h"]]};
+MODELS.cwt.meta=function(S,s){return[["MAWP at steam outlet",fmt(S.Pm,2)+" bar g"],["Operating pressure at outlet",fmt(S.Pop,2)+" bar g"],["Steam output",fmt(S.ms,0)+" kg/h"],["Hydrostatic test, first stage",fmt(s._Pt,2)+" bar g"]]};
+var KEY="boiler-calc-v6",OLDKEY="rfb-calc-v5",CUR="crf",ST={},M={};
+var MDEF={proj:"",doc:"",rev:"00",by:"",date:new Date().toISOString().slice(0,10)};M=Object.assign({},MDEF);
+function newModel(k){var m=MODELS[k],tb={};Object.keys(m.tables).forEach(function(t){var c=m.tables[t];tb[t]=c.DEF.map(function(r){return mk(c.F,r)})});return{S:Object.assign({},m.DEF),tb:tb}}
+function loadModel(k,o){var m=MODELS[k],d=newModel(k);if(!o)return d;
+ if(o.S)Object.keys(o.S).forEach(function(q){if(q in m.DEF)d.S[q]=(o.S[q]===null?NaN:o.S[q])});
+ if(o.S&&k==="crf"&&!("emode" in o.S)&&("e1on" in o.S||"e2on" in o.S)){var two=o.S.e2on&&!o.S.e1on;d.S.emode=two?"2":"1";d.S.eCA=two?o.S.e2CA:o.S.e1CA;d.S.et=two?o.S.e2t:o.S.e1t}
+ var tb=o.tb||{};Object.keys(m.tables).forEach(function(t){var c=m.tables[t];if(Array.isArray(tb[t])&&tb[t].length){d.tb[t]=tb[t].map(function(r){var base=mk(c.F,c.DEF[Math.min(1,c.DEF.length-1)]),x=Object.assign({},base,r);Object.keys(x).forEach(function(q){if(x[q]===null)x[q]=0});return x})}});return d}
+function resetAll(){MORDER.forEach(function(k){ST[k]=newModel(k)})}
+resetAll();
+try{var sv=JSON.parse(localStorage.getItem(KEY)||"null");
+ if(sv&&sv.models){MORDER.forEach(function(k){ST[k]=loadModel(k,sv.models[k])});if(MODELS[sv.cur])CUR=sv.cur;if(sv.M)M=Object.assign({},MDEF,sv.M)}
+ else{var ov=JSON.parse(localStorage.getItem(OLDKEY)||"null");if(ov&&ov.S){ST.crf=loadModel("crf",{S:ov.S,tb:{N:ov.N,T:ov.T}});if(ov.M)M=Object.assign({},MDEF,ov.M)}}}catch(e){}
+function S_(){return ST[CUR].S}function TB(){return ST[CUR].tb}function mdl(){return MODELS[CUR]}
+function save(){try{localStorage.setItem(KEY,JSON.stringify({cur:CUR,M:M,models:ST}))}catch(e){}}
+
+/* ---------- input guard: values the formulas accept but that are physically meaningless ----------
+   A negative pressure or a zero thickness gives "t required" ≤ 0, so the original sheet showed PASS.
+   Only negative values (all fields except the ones below) and zeros in fields that must be positive are flagged;
+   valid inputs are never touched, so every result for valid data is unchanged. */
+var APP_VER="2026.11-1";
+var NEG_OK={dz:1};
+var POS={P:1,Q:1,ID:1,E:1,tsh:1,fDo:1,ft:1,fLt:1,fL:1,et:1,rb:1,rh:1,rLs:1,mhA:1,mhB:1,mhC:1,mht:1,Pm:1,ms:1,xout:1,nc:1,cpsh:1,tp:1};
+var TPOS={OD:1,t:1,tn:1,Do:1,kt:1};
+function fieldsOf(m){var f=[];m.secs.forEach(function(sc){(sc.fields||[]).forEach(function(x){f.push({sec:sc.id,k:x[0],l:String(x[1]).trim(),u:x[2]})});if(sc.table==="N"){f.push({sec:sc.id,k:"tp",l:"Pad thickness, te",u:"mm"},{sec:sc.id,k:"WL2",l:"Pad outer weld size, WL2",u:"mm"})}});return f}
+function validate(m,S,tb){var bySec={},glob=[],first=m.secs[0].id,empty={};
+ fieldsOf(m).forEach(function(f){if(f.u==="flag"||f.u==="mat"||f.u==="sel")return;var v=S[f.k],msg=null;
+  if(typeof v!=="number")return;if(!isFinite(v)){if(f.sec===first)msg=f.l+" is empty";else{(empty[f.sec]=empty[f.sec]||[]).push(f.l+" is empty");return}}else if(v<0&&!NEG_OK[f.k])msg=f.l+" is negative";else if(v===0&&POS[f.k])msg=f.l+" must be above 0";
+  if(!msg)return;(bySec[f.sec]=bySec[f.sec]||[]).push(msg);if(f.sec===first)glob.push(msg)});
+ var rows={};Object.keys(m.tables).forEach(function(t){var c=m.tables[t];rows[t]=(tb[t]||[]).map(function(o){var bad=[];
+  c.IN.forEach(function(r){if(r[2]!=="num")return;var v=o[r[0]];if(typeof v!=="number"||!isFinite(v))return;if(v<0&&!NEG_OK[r[0]])bad.push(r[1].trim()+" is negative");else if(v===0&&TPOS[r[0]]&&!(t==="T"&&!(o.n>0)))bad.push(r[1].trim()+" must be above 0")});return bad})});
+ return{bySec:bySec,glob:glob,rows:rows,first:first,empty:empty}}
+function guardTable(chk,key,cs){(chk.rows[key]||[]).forEach(function(b,i){if(b.length&&cs[i]){cs[i].st="CHECK INPUT";cs[i].cls="fail";cs[i].note=b.join("; ")}})}
+function guardVerdict(chk,sc,v){var own=chk.bySec[sc.id]||[];if(chk.glob.length&&sc.id!==chk.first&&own.length===0)return V("fail","CHECK INPUT  design basis: "+chk.glob.join("; "));
+ if(own.length)return V("fail","CHECK INPUT  "+own.join("; "));
+ var em=chk.empty[sc.id];if(em&&v&&v.state==="fail")return V("fail","CHECK INPUT  "+em.join("; "));return v}
+/* ---------- reproducibility: a fingerprint of everything the results depend on ---------- */
+function canon(x){if(typeof x==="number")return isFinite(x)?String(+x.toPrecision(12)):"null";if(Array.isArray(x))return"["+x.map(canon).join(",")+"]";if(x&&typeof x==="object")return"{"+Object.keys(x).sort().map(function(k){return JSON.stringify(k)+":"+canon(x[k])}).join(",")+"}";return JSON.stringify(x===undefined?null:x)}
+function fnv(str,seed){var h=seed>>>0;for(var i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)>>>0}return("0000000"+h.toString(16)).slice(-8)}
+function fingerprint(key,st){var c=canon({model:key,S:st.S,tb:st.tb});return(fnv(c,2166136261)+fnv(c,374761393)).toUpperCase()}
+/* ---------- undo / redo: snapshots of the whole project, one per burst of typing ---------- */
+var HIST=[],FUT=[],lastCk=0;
+function snapState(){return JSON.stringify({cur:CUR,M:M,models:ST})}
+/* a forced checkpoint (file import, add/remove column, example data) is its own undo step: the next edit starts a new one */
+function checkpoint(force){var now=Date.now();if(force||now-lastCk>1000){HIST.push(snapState());if(HIST.length>200)HIST.shift();FUT=[];updUndo()}lastCk=force?0:now}
+function updUndo(){var u=document.getElementById("undoBtn"),r=document.getElementById("redoBtn");if(u)u.disabled=!HIST.length;if(r)r.disabled=!FUT.length}
+function undo(){if(!HIST.length)return;FUT.push(snapState());applyState(JSON.parse(HIST.pop()));lastCk=0;updUndo();say("Undone")}
+function redo(){if(!FUT.length)return;HIST.push(snapState());applyState(JSON.parse(FUT.pop()));lastCk=0;updUndo();say("Redone")}
+
+/* ---------- pure engine: every section verdict for a model state, no DOM (same code path as the page) ---------- */
+function computeAll(key,S,tb){var m=MODELS[key],chk=validate(m,S,tb),s,out={};
+ try{s=m.derive(Object.assign({},S),tb)}catch(e){m.secs.forEach(function(sc){out[sc.id]=V("fail","FAIL  input error ("+e.message+")")});return out}
+ m.secs.forEach(function(sc){var v;
+  if(sc.table){var cfg=m.tables[sc.table],arr=tb[sc.table],cs;try{cs=cfg.calcAll(s,arr)}catch(e){cs=arr.map(function(){return{st:"ERROR",cls:"fail"}})}guardTable(chk,sc.table,cs);v=guardVerdict(chk,sc,cfg.verdict(cs,arr,s))}
+  else{var r;try{r=sc.calc(s,tb)}catch(e){r={verdict:V("fail","FAIL  input error ("+e.message+")")}}v=guardVerdict(chk,sc,r.verdict||null)}
+  out[sc.id]=v});return out}
+function good(v){return!!v&&(v.state==="pass"||v.state==="warn")}
+
+/* ---------- pressure rating finder ----------
+   For each check, the highest design pressure at which it still passes, all other inputs unchanged.
+   Bisection on the pressure; each trial re-runs the full calculation, so derived values (saturation temperature,
+   test pressure, PG-33 areas, auto pads) follow exactly as on the sheet. Assumes each check changes from pass to
+   fail only once as pressure rises; the result is re-checked at the reported value. */
+var PKEY={crf:"P",cbd:"P",cwt:"Pm"};
+function ratingFinder(key,S,tb){var pk=PKEY[key],P0=+S[pk],cache={},m=MODELS[key],res=[];
+ function at(P){var k=P.toPrecision(9);if(!cache[k]){var S2=Object.assign({},S);S2[pk]=P;cache[k]=computeAll(key,S2,tb)}return cache[k]}
+ function bis(lo,hi,id){for(var i=0;i<40&&(hi-lo)>Math.max(1e-4*lo,1e-6);i++){var mid=(lo+hi)/2;if(good(at(mid)[id]))lo=mid;else hi=mid}return[lo,hi]}
+ if(!(P0>0))return{error:"enter a design pressure above 0 first"};
+ m.secs.forEach(function(sc){var id=sc.id,v0=at(P0)[id],r={id:id,n:sc.n,title:sc.title};
+  if(!v0||v0.state==="na"){r.kind="na";res.push(r);return}
+  if(good(v0)){var lo=P0,hi=null;for(var k=1;k<=8;k++){var y=P0*Math.pow(1.5,k);if(!good(at(y)[id])){hi=y;break}lo=y}
+   if(hi===null){r.kind="open";r.limit=Infinity;r.upto=lo}else{var b=bis(lo,hi,id);r.kind="limit";r.limit=b[0];r.why=at(b[1])[id].text}
+   r.lower=!good(at(P0/50)[id])}
+  else{var g=null,f=P0;for(var k2=1;k2<=12;k2++){var y2=P0/Math.pow(1.5,k2);if(good(at(y2)[id])){g=y2;break}f=y2}
+   if(g===null){r.kind="never";r.why=v0.text}else{var b2=bis(g,f,id);r.kind="limit";r.limit=b2[0];r.why=at(b2[1])[id].text}}
+  res.push(r)});
+ var lim=res.filter(function(r){return r.kind==="limit"}),never=res.filter(function(r){return r.kind==="never"}),gov=null;
+ lim.forEach(function(r){if(!gov||r.limit<gov.limit)gov=r});
+ var out={pk:pk,P0:P0,rows:res,gov:gov,never:never,rating:never.length?NaN:(gov?gov.limit:Infinity),trials:Object.keys(cache).length};
+ /* re-check: at the rating every check that can pass does pass, and the governing one fails just above it */
+ if(gov&&!never.length){var a=at(gov.limit),b=at(gov.limit*1.002);out.verified=res.every(function(r){return r.kind==="na"||good(a[r.id])})&&!good(b[gov.id])}
+ return out}
+
+/* ---------- one-click sizing: smallest standard size that makes a failing check pass ---------- */
+var PLATES=[6,8,9,10,12,14,15,16,18,19,20,22,25,28,30,32,35,36,38,40,45,50,55,60],RODS=[16,20,22,24,25,27,28,30,32,36,38,40,42,45,48,50,56,60];
+var AUTO={crf:{s2:["tsh",PLATES],s3:["ft",PLATES],s4:["et",PLATES],s5:["tf_t",PLATES],s6:["tr_t",PLATES],s8:["d8",RODS],s13:["mht",PLATES]},
+ cbd:{s2:["tsh",PLATES],s3:["tf_t",PLATES],s4:["tr_t",PLATES],s6:["d8",RODS],s11:["mht",PLATES]},cwt:{c6:["tsh",PLATES]}};
+function autoSize(key,S,tb,id){var a=AUTO[key]&&AUTO[key][id];if(!a)return null;var f=a[0],cur=+S[f],c=a[1].filter(function(x){return!(x<=cur)});
+ for(var i=0;i<c.length;i++){var S2=Object.assign({},S);S2[f]=c[i];if(good(computeAll(key,S2,tb)[id]))return{field:f,from:cur,value:c[i]}}
+ return{field:f,from:cur,value:null,max:a[1][a[1].length-1]}}
+
+/* ---------- CSV for Excel: everything on the sheet, one value per row ---------- */
+function csvCell(x){x=x==null?"":String(x);var inj=/^[=+\-@]/.test(x)&&!/^-?[\d.,]+$/.test(x)&&x!=="-";return/[",\n\r]/.test(x)||inj?'"'+(inj?"'":"")+x.replace(/"/g,'""')+'"':x}
+function buildCsv(){var L=[["Section","Kind","Item","Value","Unit"]],m=mdl();
+ [["Project",M.proj],["Document no.",M.doc],["Revision",M.rev],["Prepared by",M.by],["Date",M.date],["Model",m.name],["Inputs fingerprint",fingerprint(CUR,ST[CUR])],["App version",APP_VER]].forEach(function(r){L.push(["0  Project","meta",r[0],r[1]||"",""])});
+ (window.__rep||[]).forEach(function(r){var sec=r.n+"  "+r.title;(r.inputs||[]).forEach(function(x){L.push([sec,"input",x[0],x[1],x[2]])});
+  (r.rows||[]).forEach(function(x){L.push([sec,"working",x[0],x[1],x[2]])});
+  if(r.inTable)r.inTable.body.forEach(function(row){row.slice(1).forEach(function(v,i){L.push([sec,"input",r.inTable.head[i+1]+": "+row[0],v,""])})});
+  if(r.table)r.table.body.forEach(function(row){row.forEach(function(v,i){if(i)L.push([sec,"result",row[0]+": "+r.table.head[i],v,""])})});
+  if(r.verdict)L.push([sec,"verdict",r.verdict.state.toUpperCase(),r.verdict.text,""])});
+ return"﻿"+L.map(function(r){return r.map(csvCell).join(",")}).join("\r\n")+"\r\n"}
+
+/* ---------- rendering ---------- */
+var secsEl=document.getElementById("secs"),sumEl=document.getElementById("sumgrid"),overEl=document.getElementById("overall"),tabsEl=document.getElementById("tabs");
+function matOpts(){return MATKEYS.map(function(k){return'<option value="'+esc(k)+'">'+esc(k)+(MAT[k].form&&k!=="Custom"?" · "+MAT[k].form:"")+'</option>'}).join("")}
+function selOpts(o){return o.map(function(x){return'<option value="'+esc(x[0])+'">'+esc(x[1])+'</option>'}).join("")}
+function fieldHTML(f){var k=f[0],id="in-"+k;
+ if(f[2]==="flag")return'<div class="fld"><label for="'+id+'">'+esc(f[1])+'</label><select id="'+id+'" data-k="'+k+'"><option value="1">Yes</option><option value="0">No</option></select><span class="u"></span></div>';
+ if(f[2]==="mat")return'<div class="fld"><label for="'+id+'">'+esc(f[1])+'</label><select id="'+id+'" data-k="'+k+'" data-mat="1" class="matsel">'+matOpts()+'</select><span class="u"></span></div>';
+ if(f[2]==="sel")return'<div class="fld"><label for="'+id+'">'+esc(f[1])+'</label><select id="'+id+'" data-k="'+k+'" class="matsel">'+selOpts(f[4])+'</select><span class="u"></span></div>';
+ return'<div class="fld"><label for="'+id+'">'+esc(f[1])+'</label><input type="number" step="any" id="'+id+'" data-k="'+k+'" inputmode="decimal"><span class="u">'+esc(f[2]||"")+'</span>'+(f[3]?'<small>'+esc(f[3])+'</small>':'')+'</div>'}
+var secNodes={};
+function buildTable(key){var t=mdl().tables[key],a=TB()[key],box=secNodes[t.secId].tblBox;
+ var h='<table class="nzt"><thead><tr><th>'+esc(t.label.charAt(0).toUpperCase()+t.label.slice(1))+'</th>'+a.map(function(o,i){return'<th><span id="th-'+key+i+'"></span> <button type="button" class="x" data-del="'+key+'" data-i="'+i+'" aria-label="Remove '+t.label+' '+(i+1)+'"'+(a.length<=t.min?" disabled":"")+'>×</button></th>'}).join("")+'</tr></thead><tbody>';
+ t.IN.forEach(function(r){h+='<tr><td>'+esc(r[1])+(r[3]&&typeof r[3]==="string"?' <span class="u">'+esc(r[3])+'</span>':'')+'</td>'+a.map(function(o,i){var id=key+"-"+r[0]+"-"+i,at=' id="'+id+'" data-tbl="'+key+'" data-f="'+r[0]+'" data-i="'+i+'" aria-label="'+esc(r[1].trim()+(typeof r[3]==="string"?" ("+r[3]+")":"")+", "+t.label+" "+(i+1))+'"';
+  if(r[2]==="tx")return'<td><input class="tx" type="text"'+at+' size="10"></td>';if(r[2]==="mat")return'<td><select class="matsel"'+at+'>'+matOpts()+'</select></td>';if(r[2]==="sel")return'<td><select class="matsel"'+at+'>'+selOpts(r[3])+'</select></td>';return'<td><input type="number" step="any"'+at+'></td>'}).join("")+'</tr>'});
+ h+='</tbody><tbody class="out" id="out-'+key+'"></tbody></table>';box.innerHTML=h;
+ a.forEach(function(o,i){t.IN.forEach(function(r){var e=document.getElementById(key+"-"+r[0]+"-"+i),v=o[r[0]];e.value=(v===undefined||v===null||(typeof v==="number"&&!isFinite(v)))?"":v})})}
+function buildSecs(){secsEl.innerHTML="";var m=mdl();
+ m.secs.forEach(function(sc){var d=el("details","sec");d.id=sc.id;d.open=m.open.indexOf(sc.id)>=0;
+  var sm=el("summary","",'<span class="t">'+sc.n+"  "+esc(sc.title)+'</span><span class="r">'+esc(sc.ref)+'</span><span class="tag na" data-tag>–</span>');d.appendChild(sm);
+  if(sc.table){var cfg=m.tables[sc.table],tb=el("div","nz"),top=el("div","row2");
+   if(sc.table==="N")top.innerHTML=fieldHTML(["tp","Pad thickness, te","mm"])+fieldHTML(["WL2","Pad outer weld size, WL2","mm"])+fieldHTML(["nzAuto","Auto-size pads at OD + 120 where required","flag"])+fieldHTML(["mat_pad","Pad material (set above)","mat"]).replace('data-k="mat_pad"','data-k="mat_pad" disabled').replace(/in-mat_pad/g,"in-mat_pad-nz");
+   var bar=el("div","row2");bar.innerHTML='<button type="button" data-add="'+sc.table+'">Add '+cfg.label+'</button><button type="button" data-dup="'+sc.table+'">Duplicate last</button><span class="sub" style="margin:0">Remove a column with ×. Changes are saved in this browser.</span>';
+   if(sc.table==="N")d.appendChild(top);d.appendChild(bar);d.appendChild(tb);secNodes[sc.id]={d:d,tag:sm.querySelector("[data-tag]"),tblBox:tb,out:null};secsEl.appendChild(d);buildTable(sc.table);secNodes[sc.id].out=document.getElementById("out-"+sc.table);return}
+  var b=el("div","body"),L=el("div"),Rr=el("div");L.appendChild(el("p","h","Inputs"));
+  if(sc.fields.length)L.innerHTML+=sc.fields.map(fieldHTML).join("");else L.appendChild(el("p","sub","No inputs. Uses the design data above."));
+  Rr.appendChild(el("p","h","Workings"));Rr.appendChild(el("div"));b.appendChild(L);b.appendChild(Rr);d.appendChild(b);secsEl.appendChild(d);secNodes[sc.id]={d:d,tag:sm.querySelector("[data-tag]"),out:Rr.lastChild}})}
+function setInputs(){var S=S_();document.querySelectorAll("[data-k]").forEach(function(e){var v=S[e.dataset.k];if(e.tagName==="SELECT"){e.value=e.dataset.mat?String(v):(e.classList.contains("matsel")?String(v):String(v?1:0))}else e.value=ok(v)?v:""})}
+function setHead(){var m=mdl();document.getElementById("ttl").textContent=m.title;document.getElementById("sub").textContent=m.sub;document.getElementById("noteBox").innerHTML=m.note;document.getElementById("footBox").textContent=m.foot+" Material data: ASME BPVC Section II Part D (Metric) 2025, Table 1A (S), Table TM-1 (E), Table G, Table CS-1 and CS-2 (A and B). Stresses in the firetube models are shown in psi (1 MPa = 145.04 psi).";document.title=m.title;
+ tabsEl.innerHTML=MORDER.map(function(k){return'<button type="button" role="tab" class="tab" data-model="'+k+'" aria-controls="secs" tabindex="'+(k===CUR?0:-1)+'" aria-selected="'+(k===CUR)+'">'+MODELS[k].tab+'<small>'+esc(MODELS[k].name)+'</small></button>'}).join("")}
+function setMeta(){["proj","doc","rev","by","date"].forEach(function(k){document.getElementById("m-"+k).value=M[k]||""})}
+function tagSet(node,v){var st=v?v.state:"na";node.className="tag "+st;node.textContent=v?(st==="pass"?"PASS":st==="fail"?"FAIL":st==="warn"?"CHECK":"N/A"):"—"}
+function tableRows(cs,t){var h="";t.OUT.forEach(function(r){if(r[0]==="grp"){h+='<tr class="grp"><td colspan="'+(cs.length+1)+'">'+r[1]+'</td></tr>';return}
+ h+='<tr><td>'+esc(r[1])+(r[2]?' <span class="u">'+esc(r[2])+'</span>':'')+'</td>'+cs.map(function(c){if(r[0]==="st")return'<td class="'+c.cls+'">'+esc(c.st)+'</td>';var v=c[r[0]];return typeof v==="string"?'<td class="txt">'+esc(v)+'</td>':'<td>'+fmt(v,r[3])+'</td>'}).join("")+'</tr>'});return h}
+var LAST={s:null};
+function render(){var m=mdl(),tb=TB(),s=m.derive(Object.assign({},S_()),tb),sum=[],rep=[],fail=0,pass=0,warn=0,chk=validate(m,S_(),tb);LAST.s=s;
+ m.secs.forEach(function(sc){var v,rr={},out=secNodes[sc.id].out;
+  if(sc.table){var cfg=m.tables[sc.table],arr=tb[sc.table],cs;try{cs=cfg.calcAll(s,arr)}catch(e){cs=arr.map(function(){return{st:"ERROR",cls:"fail"}})}guardTable(chk,sc.table,cs);
+   out.innerHTML=tableRows(cs,cfg);rr.table={head:cfg.pdf.head,body:arr.map(function(o,i){return cfg.pdf.row(o,cs[i]).map(function(x){return x==null?"":x})}),resCol:cfg.pdf.resCol};
+   rr.inTable={head:["Input"].concat(arr.map(function(o,i){return cfg.tag(o,i)})),body:cfg.IN.map(function(r){return[r[1].trim()+(typeof r[3]==="string"&&r[2]!=="sel"?" ["+r[3]+"]":"")].concat(arr.map(function(o){var v=o[r[0]];if(r[2]==="sel")v=(r[3].filter(function(q){return+q[0]===+v}).map(function(q){return q[1]})[0])||v;return v===undefined||v===null||(typeof v==="number"&&!isFinite(v))?"-":String(v)}))})};v=guardVerdict(chk,sc,cfg.verdict(cs,arr,s));arr.forEach(function(o,i){var e=document.getElementById("th-"+sc.table+i);if(e)e.textContent=cfg.tag(o,i)})}
+  else{var r;try{r=sc.calc(s,tb)}catch(e){r={rows:[],verdict:V("fail","FAIL  input error ("+e.message+")")}}r.verdict=guardVerdict(chk,sc,r.verdict||null);
+   var h="";if(r.lines)r.lines.forEach(function(l){h+='<div class="fm">'+esc(l.f)+'</div>'});
+   if(r.rows.length){h+='<table class="res">';r.rows.forEach(function(x){h+='<tr'+(x.b?' class="b"':'')+'><td class="l">'+esc(x.l)+'</td><td class="v">'+(typeof x.v==="string"?esc(x.v):fmt(x.v,x.d))+'</td><td class="u">'+esc(x.u)+'</td></tr>'});h+='</table>'}
+   if(r.verdict)h+='<div class="verdict '+r.verdict.state+'">'+esc(r.verdict.text)+'</div>';out.innerHTML=h;v=r.verdict;rr.rows=r.rows.map(function(x){return[x.l,typeof x.v==="string"?x.v:fmt(x.v,x.d),x.u]});rr.bold=[];r.rows.forEach(function(x,i){if(x.b)rr.bold.push(i)});rr.lines=(r.lines||[]).map(function(l){return l.f})}
+  tagSet(secNodes[sc.id].tag,v);var S=S_();
+  rep.push(Object.assign({n:sc.n,title:sc.title,ref:sc.ref,verdict:v,inputs:(sc.fields||[]).map(function(f){var k=f[0],val=S[k];return[String(f[1]).trim(),f[2]==="flag"?(val?"Yes":"No"):(f[2]==="mat"?val:(f[2]==="sel"?(f[4].filter(function(o){return+o[0]===+val}).map(function(o){return o[1]})[0]||val):(ok(val)?String(val):"-"))),(f[2]==="mat"||f[2]==="flag"||f[2]==="sel")?"":f[2]]})},rr));
+  if(v){sum.push({id:sc.id,t:sc.n+"  "+sc.title,v:v});if(v.state==="fail")fail++;else if(v.state==="warn")warn++;else if(v.state==="pass")pass++}});
+ sumEl.innerHTML=sum.map(function(x){return'<a class="chip" href="#'+x.id+'" data-go="'+x.id+'"><span>'+esc(x.t)+'</span><span class="tag '+x.v.state+'">'+(x.v.state==="pass"?"PASS":x.v.state==="fail"?"FAIL":x.v.state==="warn"?"CHECK":"N/A")+'</span></a>'}).join("");
+ var fp=document.getElementById("fpBox");if(fp)fp.textContent="Inputs fingerprint "+fingerprint(CUR,ST[CUR])+" · app "+APP_VER+" · the same inputs always give the same fingerprint and results";
+ overEl.className="overall "+(fail?"fail":(warn?"warn":"pass"));overEl.textContent=fail?(fail+" check(s) failing"):(warn?("All code checks pass · "+warn+" advisory"):("All "+pass+" checks pass"));scheduleSuggest();staleRating();window.__rep=rep;window.__sum=sum.map(function(x){return x.t+" - "+x.v.text})}
+/* ---- pressure rating panel ---- */
+function pTxt(P){return CUR==="cwt"?fmt(P,2)+" bar g":fmt(P,1)+" psi ("+fmt(P/14.5038,2)+" bar)"}
+var LASTR=null;
+function showRating(){var o=document.getElementById("rateOut"),t0=performance.now(),r=ratingFinder(CUR,S_(),TB()),ms=performance.now()-t0;r.fp=fingerprint(CUR,ST[CUR]);r.key=CUR;LASTR=r;
+ if(r.error){o.innerHTML='<p class="sub">'+esc(r.error)+'</p>';return}
+ var rows=r.rows.filter(function(x){return x.kind!=="na"}).sort(function(a,b){var ka={never:0,limit:1,open:2}[a.kind],kb={never:0,limit:1,open:2}[b.kind];return ka-kb||(a.limit-b.limit)});
+ var head=r.never.length?'<div class="verdict fail">'+r.never.length+' check(s) fail at every pressure: '+esc(r.never.map(function(x){return x.n}).join(", "))+'. Fix geometry or material first.</div>':
+  (r.gov?'<div class="verdict '+(r.rating>=r.P0?"pass":"fail")+'">Maximum design pressure '+esc(pTxt(Math.floor(r.rating*100)/100))+' · governed by '+esc(r.gov.n+"  "+r.gov.title)+' · current '+esc(pTxt(r.P0))+' ('+fmt((r.rating/r.P0-1)*100,1)+' % margin)'+(r.verified?' · re-checked ✓':' · re-check failed: a check is not monotonic, review by hand')+'</div>':'<div class="verdict pass">No check limits the pressure up to '+esc(pTxt(r.P0*25))+'</div>');
+ o.innerHTML=head+'<table class="rt"><thead><tr><th>Check</th><th style="text-align:right">Passes up to</th><th>What fails above it</th></tr></thead><tbody>'+rows.map(function(x){
+  return'<tr'+(r.gov&&x.id===r.gov.id?' class="gov"':'')+'><td>'+esc(x.n+"  "+x.title)+(x.why?'<p class="sub why-m">'+esc(x.why)+'</p>':'')+'</td><td class="n">'+(x.kind==="limit"?esc(pTxt(Math.floor(x.limit*100)/100)):x.kind==="open"?"&gt; "+esc(pTxt(x.upto)):"fails at any pressure")+'</td><td>'+esc(x.why||(x.kind==="open"?"not pressure-limited in this range":""))+(x.lower?' <span class="sub">(also has a lower limit)</span>':'')+'</td></tr>'}).join("")+'</tbody></table>'+
+  '<p class="sub">'+r.trials+' full recalculations in '+fmt(ms,0)+' ms. Only the design pressure ('+r.pk+') is varied; temperatures and other inputs stay as entered, so check that they still suit the new pressure.</p>';
+ o.dataset.fp=fingerprint(CUR,ST[CUR])}
+function staleRating(){var o=document.getElementById("rateOut");if(o&&o.dataset.fp&&o.dataset.fp!==fingerprint(CUR,ST[CUR])){o.innerHTML='<p class="sub">Inputs changed: press "Find maximum pressure" again.</p>';o.dataset.fp=""}}
+/* ---- size suggestions under failing checks ---- */
+var sugT=null;
+function scheduleSuggest(){clearTimeout(sugT);sugT=setTimeout(function(){var key=CUR,S=S_(),tb=TB(),fl=fieldsOf(mdl());
+ (window.__rep||[]).forEach(function(r){var sc=mdl().secs.filter(function(x){return x.n===r.n})[0];if(!sc||!r.verdict||r.verdict.state!=="fail"||/^CHECK INPUT/.test(r.verdict.text))return;
+  var a=autoSize(key,S,tb,sc.id);if(!a)return;var vd=secNodes[sc.id]&&secNodes[sc.id].out.querySelector(".verdict");if(!vd||key!==CUR)return;
+  var lab=(fl.filter(function(f){return f.k===a.field})[0]||{l:a.field}).l,d=el("div","sug");
+  d.innerHTML=a.value?'Smallest standard size that passes: <b>'+esc(lab)+' = '+a.value+' mm</b> (now '+fmt(a.from,1)+')<button type="button" data-apply-f="'+esc(a.field)+'" data-apply-v="'+a.value+'">Apply '+a.value+' mm</button>':
+   '<span>No standard size up to '+a.max+' mm passes by changing '+esc(lab)+' alone: another input governs this check.</span>';
+  vd.after(d)})},250)}
+function onInput(e){var t=e.target;if(t.id==="impFile")return;
+ if(t.dataset.k||t.dataset.tbl||(t.id&&t.id.indexOf("m-")===0))checkpoint();
+ if(t.id&&t.id.indexOf("m-")===0){M[t.id.slice(2)]=t.value;save();return}
+ if(t.dataset.k){S_()[t.dataset.k]=t.tagName==="SELECT"?((t.dataset.mat)?t.value:+t.value):(t.value===""?NaN:parseFloat(t.value))}
+ else if(t.dataset.tbl){var o=TB()[t.dataset.tbl][+t.dataset.i],f=t.dataset.f,tx=(t.type==="text"||t.tagName==="SELECT");o[f]=tx?t.value:(t.value===""?0:parseFloat(t.value))}
+ else return;save();render()}
+function rebuild(key){buildTable(key);render();save()}
+function showModel(k){CUR=k;var ro=document.getElementById("rateOut");if(ro){ro.innerHTML="";ro.dataset.fp=""}save();setHead();buildSecs();setInputs();render();window.scrollTo(0,0)}
+
+/* ---------- project: save/open, files, PDF ---------- */
+var msgEl=document.getElementById("projMsg");
+function say(t,bad){msgEl.textContent=t;msgEl.style.color=bad?"var(--fail)":"var(--muted)"}
+function slug(t){t=String(t||"project");var a=t.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40),h=5381;for(var i=0;i<t.length;i++)h=((h<<5)+h+t.charCodeAt(i))|0;return(a||"p")+"-"+(h>>>0).toString(36)}
+function gather(){return{v:5,app:"boiler-calc",appVersion:APP_VER,saved:new Date().toISOString(),fingerprint:fingerprint(CUR,ST[CUR]),M:M,cur:CUR,models:ST}}
+function applyState(o){if(!o)throw new Error("empty");
+ if(o.models){MORDER.forEach(function(k){ST[k]=loadModel(k,o.models[k])});if(MODELS[o.cur])CUR=o.cur}
+ else if(o.S){ST.crf=loadModel("crf",{S:o.S,tb:{N:o.N,T:o.T}});CUR="crf"}
+ else throw new Error("not a project file");
+ M=Object.assign({},MDEF,o.M||{});save();setHead();buildSecs();setInputs();setMeta();render()}
+var DBC=null;
+function dbShow(){document.querySelectorAll("[data-db]").forEach(function(e){e.hidden=false})}
+function refreshList(){if(!DBC)return;DBC.get().then(function(q){var sel=document.getElementById("projList"),rows=[];q.docs.forEach(function(d){var x=d.data();if(x&&(x.kind==="rfb"||x.kind==="wtb"))rows.push({id:d.id,name:x.name,at:x.updated,cur:x.cur||"crf"})});
+ rows.sort(function(a,b){return(b.at||0)-(a.at||0)});sel.innerHTML=rows.length?rows.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name||"(unnamed)")+' · '+esc(String(r.cur).toUpperCase())+' · '+esc(new Date(r.at||0).toLocaleDateString())+'</option>'}).join(""):'<option value="">(no saved projects)</option>'},function(){say("Could not list saved projects",1)})}
+(function(){try{if(!window.claude||!claude.use)return;Promise.all([claude.use("db"),claude.use("user")]).then(function(a){if(!a[0]||!a[1])return;return a[1].id().then(function(id){if(!id)return;DBC=a[0].collection("data/users/"+id);dbShow();refreshList()})}).catch(function(){})}catch(e){}})();
+var DLS=null;
+(function(){try{if(window.claude&&claude.use)claude.use("downloads").then(function(d){DLS=d;if(d)document.querySelectorAll("[data-dl]").forEach(function(e){e.hidden=false})}).catch(function(){})}catch(e){}})();
+function fname(ext){return(slug(M.proj||"boiler").replace(/-[a-z0-9]+$/,"")||"boiler")+"_"+CUR.toUpperCase()+"_rev"+(M.rev||"00")+"."+ext}
+function saveDl(name,data,type){if(!DLS){try{var a=document.createElement("a"),u=URL.createObjectURL(new Blob([data],{type:type||"application/octet-stream"}));a.href=u;a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(u);a.remove()},2000);say("Saved "+name)}catch(x){say("Could not save the file: "+x.message,1)}return}DLS.save({filename:name,data:data}).then(function(){say("Saved "+name)},function(e){say(e&&e.code==="declined"?"Save cancelled":"Could not save the file",e&&e.code!=="declined")})}
+function pdfSafe(t){return String(t==null?"":t).replace(/[−–—]/g,"-").replace(/≥/g,">=").replace(/≤/g,"<=").replace(/√/g,"sqrt").replace(/⁴/g,"^4").replace(/³/g,"^3").replace(/²/g,"2").replace(/π/g,"pi").replace(/σ/g,"sigma").replace(/ε/g,"eps").replace(/Σ/g,"Sum").replace(/Δ/g,"d").replace(/Ø/g,"dia ").replace(/·/g,"-").replace(/×/g,"x").replace(/…/g,"...").replace(/°/g,"\xb0").replace(/[^\x00-\xff]/g,"?")}
+function buildPdf(){var J=window.jspdf&&window.jspdf.jsPDF;if(!J)throw new Error("PDF library not loaded");var m=mdl(),S=S_(),doc=new J({unit:"mm",format:"a4"}),W=210,Mg=14;
+ var s=LAST.s;
+ function head(){doc.setFont("helvetica","bold");doc.setFontSize(9);doc.text(pdfSafe((M.proj||m.pdfName)+" - Calculation sheet"),Mg,10);doc.setFont("helvetica","normal");doc.text(pdfSafe((M.doc?M.doc+"  ":"")+"Rev. "+(M.rev||"")),W-Mg,10,{align:"right"});doc.setDrawColor(150);doc.line(Mg,12,W-Mg,12)}
+ var FP=fingerprint(CUR,ST[CUR]);function foot(n,N){doc.setFontSize(8);doc.setTextColor(110);doc.text("ASME BPVC Section I (2025 ed.) - material data: Section II Part D (Metric) 2025",Mg,286);doc.text("Inputs fingerprint "+FP+"  -  app "+APP_VER+"  -  printed "+new Date().toISOString().slice(0,16).replace("T"," "),Mg,290);doc.text("Page "+n+" of "+N,W-Mg,290,{align:"right"});doc.setTextColor(0)}
+ head();doc.setFont("helvetica","bold");doc.setFontSize(16);doc.text(pdfSafe(m.pdfName),Mg,24);doc.setFontSize(11);doc.text("Design calculation - ASME Section I",Mg,31);
+ doc.setFont("helvetica","normal");doc.setFontSize(10);
+ var meta=[["Inputs fingerprint",FP],["Project",M.proj],["Document no.",M.doc],["Revision",M.rev],["Prepared by",M.by],["Date",M.date]].concat(m.meta(S,s));
+ doc.autoTable({startY:36,body:meta.map(function(r){return[pdfSafe(r[0]),pdfSafe(r[1]||"-")]}),theme:"plain",styles:{fontSize:10,cellPadding:1},columnStyles:{0:{fontStyle:"bold",cellWidth:50}},margin:{left:Mg,right:Mg,top:16,bottom:16}});
+ var sum=window.__rep||[];
+ doc.autoTable({startY:doc.lastAutoTable.finalY+6,head:[["Check","Result"]],body:sum.map(function(r){return[pdfSafe(r.n+"  "+r.title),r.verdict?(r.verdict.state==="pass"?"PASS":r.verdict.state==="fail"?"FAIL":r.verdict.state==="warn"?"CHECK":"N/A"):"-"]}),styles:{fontSize:9,cellPadding:1.5},headStyles:{fillColor:[13,92,115]},margin:{left:Mg,right:Mg,top:16,bottom:16},
+  didParseCell:function(d){if(d.section==="body"&&d.column.index===1){var v=d.cell.raw;d.cell.styles.fontStyle="bold";d.cell.styles.textColor=v==="PASS"?[15,107,58]:v==="FAIL"?[161,29,29]:v==="CHECK"?[150,90,0]:[91,107,120]}}});
+ /* pressure rating, only if it was run on exactly these inputs */
+ if(LASTR&&LASTR.key===CUR&&LASTR.fp===FP&&!LASTR.error){doc.addPage();doc.setFont("helvetica","bold");doc.setFontSize(12);doc.text("Pressure rating (each check at its highest passing design pressure)",Mg,20);doc.setFont("helvetica","normal");doc.setFontSize(8.5);
+  var hl=LASTR.never.length?"Checks failing at any pressure: "+LASTR.never.map(function(x){return x.n}).join(", "):(LASTR.gov?"Maximum design pressure "+pTxt(Math.floor(LASTR.rating*100)/100)+", governed by "+LASTR.gov.n+" "+LASTR.gov.title+(LASTR.verified?" (re-checked)":" (re-check failed: review by hand)"):"No limiting check found");
+  doc.text(doc.splitTextToSize(pdfSafe(hl+". Only the design pressure is varied; all other inputs as entered."),W-2*Mg),Mg,26);
+  doc.autoTable({startY:34,head:[["Check","Passes up to","What fails above it"]],body:LASTR.rows.filter(function(x){return x.kind!=="na"}).map(function(x){return[pdfSafe(x.n+"  "+x.title),pdfSafe(x.kind==="limit"?pTxt(Math.floor(x.limit*100)/100):x.kind==="open"?"> "+pTxt(x.upto):"fails at any pressure"),pdfSafe(x.why||"")]}),styles:{fontSize:8,cellPadding:1.2},headStyles:{fillColor:[13,92,115]},margin:{left:Mg,right:Mg,top:16,bottom:16},
+   didParseCell:function(d){if(d.section==="body"&&LASTR.gov&&d.row.index===LASTR.rows.filter(function(x){return x.kind!=="na"}).indexOf(LASTR.gov))d.cell.styles.fontStyle="bold"}})}
+ sum.forEach(function(r){doc.addPage();doc.setFont("helvetica","bold");doc.setFontSize(12);doc.text(pdfSafe(r.n+"  "+r.title),Mg,20);doc.setFont("helvetica","normal");doc.setFontSize(8.5);doc.setTextColor(100);doc.text(pdfSafe(r.ref),Mg,25);doc.setTextColor(0);var yy=29;
+  if(r.inputs&&r.inputs.length){doc.autoTable({startY:yy,head:[["Input","Value","Unit"]],body:r.inputs.map(function(x){return[pdfSafe(x[0]),pdfSafe(x[1]),pdfSafe(x[2])]}),styles:{fontSize:8.5,cellPadding:1.2},headStyles:{fillColor:[90,107,120]},columnStyles:{1:{halign:"right",cellWidth:34},2:{cellWidth:16}},margin:{left:Mg,right:Mg,top:16,bottom:16}});yy=doc.lastAutoTable.finalY+4}
+  if(r.lines&&r.lines.length){doc.setFont("courier","normal");doc.setFontSize(8.5);r.lines.forEach(function(l){var t=doc.splitTextToSize(pdfSafe(l),W-2*Mg);doc.text(t,Mg,yy+3);yy+=t.length*4+1});doc.setFont("helvetica","normal");yy+=2}
+  if(r.rows&&r.rows.length){doc.autoTable({startY:yy,head:[["Working","Value","Unit"]],body:r.rows.map(function(x){return[pdfSafe(x[0]),pdfSafe(x[1]),pdfSafe(x[2])]}),styles:{fontSize:8.5,cellPadding:1.2},headStyles:{fillColor:[13,92,115]},columnStyles:{1:{halign:"right",cellWidth:34},2:{cellWidth:16}},margin:{left:Mg,right:Mg,top:16,bottom:16},
+   didParseCell:function(d){if(d.section==="body"&&r.bold&&r.bold.indexOf(d.row.index)>=0)d.cell.styles.fontStyle="bold"}});yy=doc.lastAutoTable.finalY+4}
+  if(r.inTable){doc.autoTable({startY:yy,head:[r.inTable.head.map(pdfSafe)],body:r.inTable.body.map(function(row){return row.map(pdfSafe)}),styles:{fontSize:r.inTable.head.length>8?6:7.5,cellPadding:0.9},headStyles:{fillColor:[90,107,120]},columnStyles:{0:{cellWidth:r.inTable.head.length>8?42:60}},margin:{left:Mg,right:Mg,top:16,bottom:16}});yy=doc.lastAutoTable.finalY+4}
+  if(r.table){doc.autoTable({startY:yy,head:[r.table.head.map(pdfSafe)],body:r.table.body.map(function(row){return row.map(pdfSafe)}),styles:{fontSize:r.table.head.length>12?6:7.2,cellPadding:1},headStyles:{fillColor:[13,92,115]},margin:{left:Mg,right:Mg,top:16,bottom:16},
+   didParseCell:function(d){if(d.section==="body"&&d.column.index===r.table.resCol){var v=String(d.cell.raw);d.cell.styles.fontStyle="bold";d.cell.styles.textColor=/^PASS/.test(v)?[15,107,58]:/^N\/A/.test(v)?[91,107,120]:[161,29,29]}}});yy=doc.lastAutoTable.finalY+4}
+  if(r.verdict){doc.setFont("helvetica","bold");doc.setFontSize(10);var st=r.verdict.state;doc.setTextColor.apply(doc,st==="pass"?[15,107,58]:st==="fail"?[161,29,29]:st==="warn"?[150,90,0]:[91,107,120]);var t=doc.splitTextToSize(pdfSafe(r.verdict.text),W-2*Mg);if(yy+t.length*5>280){doc.addPage();yy=20}doc.text(t,Mg,yy+4);doc.setTextColor(0)}});
+ var n=doc.getNumberOfPages();for(var i=1;i<=n;i++){doc.setPage(i);if(i>1)head();foot(i,n)}
+ return doc}
+
+setHead();buildSecs();setInputs();setMeta();render();updUndo();
+/* read-only hooks for the automated tests (tests/unit.js); the page does not depend on them */
+window.BoilerCalc={version:APP_VER,MODELS:MODELS,MAT:MAT,computeAll:computeAll,ratingFinder:ratingFinder,autoSize:autoSize,validate:validate,fingerprint:fingerprint,canon:canon,buildCsv:buildCsv,
+ newModel:newModel,state:function(){return JSON.parse(JSON.stringify(ST))},cur:function(){return CUR},fn:{interp:interp,Atab:Atab,Bchart:Bchart,Ainv:Ainv,matInfo:matInfo,stat:stat,liqAt:liqAt,yFer:yFer,b165:b165,haal:haal,csvCell:csvCell}};
+document.addEventListener("input",onInput);document.addEventListener("change",onInput);
+document.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;var k;
+ if(b.dataset.model){if(b.dataset.model!==CUR)showModel(b.dataset.model);return}
+ if(b.dataset.add||b.dataset.dup||b.dataset.del)checkpoint(true);
+ if(b.dataset.add){k=b.dataset.add;var c=mdl().tables[k],a=TB()[k],n=Object.assign({},a[a.length-1]||mk(c.F,c.DEF[0]));c.onAdd(n,a);a.push(n);rebuild(k)}
+ else if(b.dataset.dup){k=b.dataset.dup;var c2=mdl().tables[k],a2=TB()[k],n2=Object.assign({},a2[a2.length-1]);c2.onDup(n2);a2.push(n2);rebuild(k)}
+ else if(b.dataset.del){k=b.dataset.del;var a3=TB()[k];if(a3.length>mdl().tables[k].min){a3.splice(+b.dataset.i,1);rebuild(k)}}
+ else if(b.id==="saveBtn"){if(!DBC)return;var nm=(M.proj||"").trim();if(!nm){say("Enter a project name first",1);return}DBC.doc("p-"+slug(nm)).set({kind:"wtb",name:nm,cur:CUR,updated:Date.now(),state:JSON.stringify(gather())}).then(function(){say("Saved “"+nm+"” to your projects (all three models)");refreshList()},function(){say("Save failed",1)})}
+ else if(b.id==="openBtn"){var id=document.getElementById("projList").value;if(!DBC||!id)return;DBC.doc(id).get().then(function(d){if(!d.exists){say("Project not found",1);return}try{var o2=JSON.parse(d.data().state);checkpoint(true);applyState(o2);say("Opened “"+(M.proj||"project")+"”")}catch(x){say("Could not open this project",1)}},function(){say("Could not open this project",1)})}
+ else if(b.id==="delBtn"){var id2=document.getElementById("projList").value;if(!DBC||!id2)return;if(b.dataset.arm!=="1"){b.dataset.arm="1";b.textContent="Confirm delete";setTimeout(function(){b.dataset.arm="0";b.textContent="Delete"},4000);return}b.dataset.arm="0";b.textContent="Delete";DBC.doc(id2).delete().then(function(){say("Deleted");refreshList()},function(){say("Delete failed",1)})}
+ else if(b.id==="expJson"){saveDl(fname("json"),JSON.stringify(gather(),null,1),"application/json")}
+ else if(b.id==="impJson"){document.getElementById("impFile").click()}
+ else if(b.id==="pdfBtn"){if(!(window.jspdf&&window.jspdf.jsPDF&&window.jspdf.jsPDF.API.autoTable)){say("PDF needs the jsPDF library from cdnjs.cloudflare.com, which did not load (offline?). Export the .json file instead, or reconnect and reload.",1);return}try{var pd=buildPdf();saveDl(fname("pdf"),pd.output("arraybuffer"),"application/pdf")}catch(x){say("PDF failed: "+x.message,1)}}
+ else if(b.id==="resetBtn"){if(b.dataset.arm!=="1"){b.dataset.arm="1";b.textContent="Replace "+CUR.toUpperCase()+" inputs? Click again";setTimeout(function(){b.dataset.arm="0";b.textContent="Load example data"},4000);return}
+  b.dataset.arm="0";b.textContent="Load example data";checkpoint(true);ST[CUR]=newModel(CUR);save();buildSecs();setInputs();render();say("Example data loaded for "+CUR.toUpperCase()+" — Undo restores your inputs")}
+ else if(b.id==="undoBtn"){undo()}
+ else if(b.id==="rateBtn"){b.disabled=true;b.textContent="Calculating…";setTimeout(function(){try{showRating()}catch(x){document.getElementById("rateOut").textContent="Could not finish: "+x.message}b.disabled=false;b.textContent="Find maximum pressure"},30)}
+ else if(b.id==="csvBtn"){saveDl(fname("csv"),buildCsv(),"text/csv;charset=utf-8")}
+ else if(b.dataset.applyF){checkpoint(true);S_()[b.dataset.applyF]=+b.dataset.applyV;save();setInputs();render();say("Set "+b.dataset.applyF+" = "+b.dataset.applyV+" mm — Undo to revert")}else if(b.id==="redoBtn"){redo()}
+ else if(b.id==="copyBtn"){var txt=mdl().pdfName+" - design checks\n"+(window.__sum||[]).join("\n");function done(m){var o=b.textContent;b.textContent=m;setTimeout(function(){b.textContent=o},1600)}
+  function fallback(){var ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand("copy");done("Copied")}catch(x){done("Copy failed")}document.body.removeChild(ta)}
+  try{navigator.clipboard.writeText(txt).then(function(){done("Copied")},fallback)}catch(x){fallback()}}});
+document.getElementById("impFile").addEventListener("change",function(e){var f=e.target.files&&e.target.files[0];if(!f)return;var rd=new FileReader();rd.onload=function(){try{var o=JSON.parse(rd.result);checkpoint(true);applyState(o);say("Imported "+f.name)}catch(x){say("This is not a project file from this page",1)}};rd.readAsText(f);e.target.value=""});
+tabsEl.addEventListener("keydown",function(e){var i=MORDER.indexOf(CUR),j=e.key==="ArrowRight"?i+1:e.key==="ArrowLeft"?i-1:e.key==="Home"?0:e.key==="End"?MORDER.length-1:-9;if(j===-9)return;e.preventDefault();j=(j+MORDER.length)%MORDER.length;showModel(MORDER[j]);var bt=tabsEl.querySelector('[data-model="'+MORDER[j]+'"]');if(bt)bt.focus()});
+document.addEventListener("keydown",function(e){var mod=e.ctrlKey||e.metaKey,a=document.activeElement,typing=a&&(a.tagName==="INPUT"||a.tagName==="TEXTAREA"||a.tagName==="SELECT");if(!mod||typing)return;var k=e.key.toLowerCase();
+ if(k==="z"&&!e.shiftKey){e.preventDefault();undo()}else if(k==="y"||(k==="z"&&e.shiftKey)){e.preventDefault();redo()}});
+sumEl.addEventListener("click",function(e){var a=e.target.closest("[data-go]");if(!a)return;e.preventDefault();var d=document.getElementById(a.dataset.go);if(d){d.open=true;d.scrollIntoView({behavior:"smooth",block:"start"})}});
+})();
+</script>
